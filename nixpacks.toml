@@ -1,0 +1,12 @@
+# Nixpacks configuration for Railway deployment
+# psycopg2-binary is pre-compiled and doesn't need PostgreSQL dev libraries
+
+[phases.setup]
+nixPkgs = ["python39"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "python3 bot.py"
+
