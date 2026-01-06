@@ -80,6 +80,7 @@ class OpenAIService:
         Returns:
             List of food item dictionaries with 'name' and 'quantity'
         """
+        import re
         food_items = []
         lines = analysis_text.split('\n')
         
@@ -88,44 +89,84 @@ class OpenAIService:
             if not line or line.startswith('#'):
                 continue
             
-            # Try to extract food name and quantity
-            # Patterns: "150g chicken breast", "chicken breast (150g)", "100g rice", etc.
-            import re
+            # Remove bullet points and common prefixes
+            line = re.sub(r'^[-•\d.)]+\s*', '', line)
+            line = line.strip()
             
-            # Pattern 1: "150g food name"
+            # Pattern 1: "food name - approximately 200g (100g)" or similar
+            # Extract the first quantity mentioned (usually the actual estimate)
+            match = re.search(r'(.+?)\s*[-–—]\s*(?:approximately\s*)?(\d+)\s*g', line, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip()
+                quantity = int(match.group(2))
+                # Clean up name - remove extra descriptions
+                name = re.sub(r'\s*\([^)]*\)\s*', '', name)  # Remove parenthetical notes
+                name = re.sub(r'\s*-\s*.*$', '', name)  # Remove everything after dash
+                name = name.strip()
+                if name:
+                    food_items.append({"name": name, "quantity": quantity})
+                continue
+            
+            # Pattern 2: "150g food name"
             match = re.search(r'(\d+)\s*g\s+(.+)', line, re.IGNORECASE)
             if match:
                 quantity = int(match.group(1))
                 name = match.group(2).strip()
-                food_items.append({"name": name, "quantity": quantity})
+                # Clean up name
+                name = re.sub(r'\s*\([^)]*\)\s*', '', name)
+                name = re.sub(r'\s*-\s*.*$', '', name)
+                name = name.strip()
+                if name:
+                    food_items.append({"name": name, "quantity": quantity})
                 continue
             
-            # Pattern 2: "food name (150g)"
-            match = re.search(r'(.+?)\s*\((\d+)\s*g\)', line, re.IGNORECASE)
+            # Pattern 3: "food name (150g)" or "food name (3 pieces) (30g)"
+            # Try to get the last quantity in parentheses
+            match = re.findall(r'\((\d+)\s*g\)', line, re.IGNORECASE)
             if match:
-                name = match.group(1).strip()
-                quantity = int(match.group(2))
-                food_items.append({"name": name, "quantity": quantity})
+                quantity = int(match[-1])  # Use last quantity found
+                # Extract food name (everything before first parenthesis)
+                name = re.split(r'\(', line)[0].strip()
+                name = re.sub(r'\s*-\s*.*$', '', name)
+                name = name.strip()
+                if name:
+                    food_items.append({"name": name, "quantity": quantity})
                 continue
             
-            # Pattern 3: Just food name (default to 100g)
-            if line and not line.startswith('-') and len(line) > 2:
-                # Remove common prefixes
-                clean_line = re.sub(r'^[-•\d.]+\s*', '', line)
-                if clean_line:
+            # Pattern 4: "food name - description" (try to extract food name)
+            if ' - ' in line or '–' in line:
+                name = re.split(r'[-–—]', line)[0].strip()
+                # Try to find quantity in the description part
+                quantity_match = re.search(r'(\d+)\s*g', line, re.IGNORECASE)
+                quantity = int(quantity_match.group(1)) if quantity_match else 100
+                name = re.sub(r'\s*\([^)]*\)\s*', '', name)
+                if name and len(name) > 2:
+                    food_items.append({"name": name, "quantity": quantity})
+                continue
+            
+            # Pattern 5: Just food name (default to 100g)
+            if line and len(line) > 2:
+                # Remove parenthetical notes
+                clean_line = re.sub(r'\s*\([^)]*\)\s*', '', line)
+                clean_line = clean_line.strip()
+                # Skip if it looks like a description or instruction
+                if not any(word in clean_line.lower() for word in ['format', 'provide', 'list', 'item', 'food']):
                     food_items.append({"name": clean_line, "quantity": 100})
         
         # If no items found, try to extract from text more loosely
         if not food_items:
-            # Look for any food-like words
-            words = re.findall(r'\b([a-z]+(?:\s+[a-z]+)*)\b', analysis_text.lower())
-            common_foods = ['chicken', 'salmon', 'fish', 'rice', 'pasta', 'bread', 
-                          'egg', 'eggs', 'vegetable', 'salad', 'fruit', 'meat',
-                          'broccoli', 'spinach', 'carrot', 'potato', 'tomato']
-            for word in words:
-                if any(food in word for food in common_foods):
-                    food_items.append({"name": word, "quantity": 100})
-                    break
+            # Look for food mentions with quantities
+            food_quantity_pattern = re.findall(r'(\d+)\s*g\s+([a-z]+(?:\s+[a-z]+)*)', analysis_text.lower())
+            for quantity, food in food_quantity_pattern:
+                food_items.append({"name": food, "quantity": int(quantity)})
+        
+        # Clean up food names - remove common prefixes/suffixes
+        for item in food_items:
+            name = item["name"].lower()
+            # Remove common descriptive words that aren't part of food name
+            name = re.sub(r'\b(sliced|diced|chopped|grilled|roasted|cooked|raw|fresh|approximately|about|around)\b', '', name)
+            name = re.sub(r'\s+', ' ', name).strip()
+            item["name"] = name
         
         return food_items if food_items else [{"name": "unidentified meal", "quantity": 100}]
     

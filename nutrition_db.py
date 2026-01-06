@@ -91,7 +91,7 @@ class NutritionDB:
             if key_base in food_name_lower or food_name_lower in key_base:
                 return key
         
-        # Keyword matching
+        # Keyword matching - expanded list
         keywords = {
             "chicken": "chicken_breast_100g",
             "salmon": "salmon_100g",
@@ -108,12 +108,42 @@ class NutritionDB:
             "banana": "banana_100g",
             "orange": "orange_100g",
             "almond": "almonds_100g",
-            "cheese": "cheese_100g"
+            "cheese": "cheese_100g",
+            "steak": "beef_steak_100g",
+            "beef": "beef_100g",
+            "asparagus": "asparagus_100g",
+            "tomato": "tomatoes_100g",
+            "tomatoes": "tomatoes_100g",
+            "cherry tomato": "cherry_tomatoes_100g",
+            "cherry tomatoes": "cherry_tomatoes_100g",
+            "pork": "pork_100g",
+            "turkey": "turkey_100g",
+            "carrot": "carrots_100g",
+            "carrots": "carrots_100g",
+            "potato": "potatoes_100g",
+            "potatoes": "potatoes_100g",
+            "pasta": "pasta_100g_cooked",
+            "quinoa": "quinoa_100g_cooked",
+            "sweet potato": "sweet_potato_100g",
+            "sweet potatoes": "sweet_potato_100g",
+            "bell pepper": "bell_pepper_100g",
+            "pepper": "bell_pepper_100g",
+            "cucumber": "cucumber_100g",
+            "zucchini": "zucchini_100g"
         }
         
+        # Try keyword matching (check if any keyword appears in food name)
         for keyword, key in keywords.items():
             if keyword in food_name_lower:
                 return key
+        
+        # Try partial matching - check if food name contains any part of database keys
+        for key in self.food_nutrients.keys():
+            key_words = key.replace("_100g", "").replace("_100ml", "").replace("_cooked", "").split("_")
+            # Check if any word from the key appears in the food name
+            for key_word in key_words:
+                if len(key_word) > 3 and key_word in food_name_lower:
+                    return key
         
         return None
     
