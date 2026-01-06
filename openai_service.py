@@ -15,6 +15,60 @@ class OpenAIService:
         """Initialize OpenAI client."""
         self.client = OpenAI(api_key=OPENAI_API_KEY)
     
+    def classify_user_intent(self, text: str) -> str:
+        """
+        Use LLM to classify user intent. Returns one of:
+        - 'meal_log': User wants to LOG a meal they ate (e.g., "Ich hatte Hähnchen mit Reis")
+        - 'question': User is asking a question or wants information (e.g., "Was habe ich gegessen?", "Welche Nährstoffe fehlen?")
+        - 'greeting': User is greeting or just chatting
+        
+        Args:
+            text: User's message
+        
+        Returns:
+            Intent classification string
+        """
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """Classify the user's intent into exactly ONE of these categories:
+- meal_log: User is TELLING you about a meal they want to LOG (stating what they ate/are eating as a fact to record)
+- question: User is ASKING something - a question about nutrition, what they've eaten, recommendations, pregnancy, or anything else
+- greeting: User is greeting, saying hello, or casual chat
+
+IMPORTANT distinctions:
+- "Ich hatte Hähnchen zum Mittag" = meal_log (stating a meal to record)
+- "Was habe ich heute gegessen?" = question (asking about past meals)
+- "Wie ist meine Ernährung?" = question (asking for evaluation)
+- "Zum Frühstück gab es Müsli" = meal_log (reporting breakfast)
+- "Welche Nährstoffe fehlen mir?" = question (asking about nutrients)
+
+Respond with ONLY the category name, nothing else."""
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ],
+            max_tokens=10,
+            temperature=0
+        )
+        
+        intent = response.choices[0].message.content.strip().lower()
+        
+        # Normalize response
+        if "meal" in intent or "log" in intent:
+            return "meal_log"
+        elif "question" in intent or "ask" in intent:
+            return "question"
+        elif "greet" in intent or "hello" in intent:
+            return "greeting"
+        else:
+            # Default to question to avoid accidentally logging meals
+            return "question"
+    
     def analyze_meal_image(self, image_path: str) -> Dict:
         """
         Analyze a meal image using OpenAI Vision API and extract nutrition directly from LLM.

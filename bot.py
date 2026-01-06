@@ -121,51 +121,30 @@ Fragen? Schreib mir einfach eine Nachricht!
             )
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages - conversational responses and meal descriptions."""
+        """Handle text messages - let LLM classify intent and respond appropriately."""
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or "there"
         text = update.message.text
         
-        # Check if it's a nutrition question (English + German)
-        text_lower = text.lower()
-        is_nutrition_question = any(phrase in text_lower for phrase in [
-            # English
-            'nutrient', 'missing', 'what should i eat', 'what am i missing',
-            'what do i need', 'recommendation', 'suggestion', 'what nutrients',
-            'deficient', 'low in', 'need more', 'pregnancy week', 'trimester',
-            # German
-            'nährstoff', 'fehlt', 'was soll ich essen', 'was fehlt mir',
-            'was brauche ich', 'empfehlung', 'vorschlag', 'welche nährstoffe',
-            'mangel', 'brauche mehr', 'schwangerschaftswoche', 'welche woche',
-            'woche bin ich', 'trimester', 'wie weit', 'wie lange noch'
-        ])
+        # Let LLM classify user intent instead of rigid keyword matching
+        intent = self.openai_service.classify_user_intent(text)
+        logger.info(f"User intent classified as: {intent} for message: {text[:50]}...")
         
-        # Check if it's a meal description (English + German)
-        is_meal_description = any(phrase in text_lower for phrase in [
-            # English
-            'ate', 'had', 'eating', 'meal', 'breakfast', 'lunch', 'dinner',
-            'snack', 'food', 'chicken', 'rice', 'salad', 'soup',
-            # German
-            'gegessen', 'hatte', 'esse', 'mahlzeit', 'frühstück', 'mittagessen',
-            'abendessen', 'snack', 'essen', 'hähnchen', 'reis', 'salat', 'suppe',
-            'brot', 'ei', 'eier', 'joghurt', 'obst', 'gemüse'
-        ])
-        
-        if is_nutrition_question:
-            # Answer nutrition questions with context
+        if intent == "question":
+            # Answer questions with context from nutrition diary
             try:
-                response = await update.message.reply_text("💭 Lass mich deinen Ernährungsstatus prüfen...")
+                response = await update.message.reply_text("💭 Einen Moment...")
                 answer = self.openai_service.answer_nutrition_question(
                     text, user_id, self.meal_diary, self.analyzer
                 )
                 await response.edit_text(answer)
             except Exception as e:
-                logger.error(f"Error answering nutrition question: {e}", exc_info=True)
+                logger.error(f"Error answering question: {e}", exc_info=True)
                 await update.message.reply_text(
-                    "❌ Entschuldigung, ich konnte deinen Ernährungsstatus nicht analysieren. Versuch es nochmal oder nutze /diary für deine Übersicht."
+                    "❌ Entschuldigung, da ist etwas schiefgelaufen. Versuch es nochmal!"
                 )
         
-        elif is_meal_description:
+        elif intent == "meal_log":
             # Parse meal description and log it
             try:
                 processing_msg = await update.message.reply_text(
@@ -380,37 +359,18 @@ Halte es gesprächig, ermutigend und unterstützend. Sei kurz (2-3 Sätze max)."
                 # Update processing message
                 await processing_msg.edit_text(f"📝 Du hast gesagt: \"{transcribed_text}\"\n\nIch verarbeite das...")
                 
-                # Check if it's a question or meal description (English + German)
-                text_lower = transcribed_text.lower()
-                is_nutrition_question = any(phrase in text_lower for phrase in [
-                    # English
-                    'nutrient', 'missing', 'what should i eat', 'what am i missing',
-                    'what do i need', 'recommendation', 'suggestion', 'what nutrients',
-                    'pregnancy week', 'trimester',
-                    # German
-                    'nährstoff', 'fehlt', 'was soll ich essen', 'was fehlt mir',
-                    'was brauche ich', 'empfehlung', 'vorschlag', 'welche nährstoffe',
-                    'schwangerschaftswoche', 'welche woche', 'woche bin ich', 'trimester'
-                ])
+                # Use LLM to classify intent
+                intent = self.openai_service.classify_user_intent(transcribed_text)
+                logger.info(f"Voice intent classified as: {intent}")
                 
-                is_meal_description = any(phrase in text_lower for phrase in [
-                    # English
-                    'ate', 'had', 'eating', 'meal', 'breakfast', 'lunch', 'dinner',
-                    'snack', 'food', 'chicken', 'rice', 'salad', 'soup',
-                    # German
-                    'gegessen', 'hatte', 'esse', 'mahlzeit', 'frühstück', 'mittagessen',
-                    'abendessen', 'snack', 'essen', 'hähnchen', 'reis', 'salat', 'suppe',
-                    'brot', 'ei', 'eier', 'joghurt', 'obst', 'gemüse'
-                ])
-                
-                if is_nutrition_question:
-                    # Answer nutrition question
+                if intent == "question":
+                    # Answer question with nutrition context
                     answer = self.openai_service.answer_nutrition_question(
                         transcribed_text, user_id, self.meal_diary, self.analyzer
                     )
                     await processing_msg.edit_text(answer)
                 
-                elif is_meal_description:
+                elif intent == "meal_log":
                     # Parse meal description and log it - LLM provides nutrients
                     meal_timestamp = self.openai_service.parse_time_context(transcribed_text)
                     result = self.openai_service.parse_meal_description_with_nutrients(transcribed_text)
