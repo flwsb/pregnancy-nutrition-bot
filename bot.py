@@ -4,6 +4,7 @@ import tempfile
 import os
 from pathlib import Path
 from datetime import datetime
+from typing import List, Dict
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from openai_service import OpenAIService
@@ -151,8 +152,8 @@ Questions? Just send a message and I'll help!
                 # Parse time context
                 meal_timestamp = self.openai_service.parse_time_context(text)
                 
-                # Parse meal description
-                result = self.openai_service.parse_meal_description(text)
+                # Parse meal description - ask LLM for nutrients too
+                result = self.openai_service.parse_meal_description_with_nutrients(text)
                 food_items = result["food_items"]
                 
                 if not food_items:
@@ -161,8 +162,8 @@ Questions? Just send a message and I'll help!
                     )
                     return
                 
-                # Calculate nutrients
-                nutrients = self.nutrition_db.estimate_nutrients(food_items)
+                # Aggregate nutrients from LLM-provided data
+                nutrients = self._aggregate_nutrients_from_items(food_items)
                 
                 # Save to diary
                 meal_id = self.meal_diary.add_meal(user_id, food_items, nutrients, meal_timestamp)
@@ -276,12 +277,12 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
                 await file.download_to_drive(tmp_path)
             
             try:
-                # Analyze image
+                # Analyze image - LLM provides nutrients directly
                 result = self.openai_service.analyze_meal_image(tmp_path)
                 food_items = result["food_items"]
                 
-                # Calculate nutrients
-                nutrients = self.nutrition_db.estimate_nutrients(food_items)
+                # Aggregate nutrients from all food items (LLM provides nutrients per item)
+                nutrients = self._aggregate_nutrients_from_items(food_items)
                 
                 # Save to diary with custom timestamp if provided
                 meal_id = self.meal_diary.add_meal(user_id, food_items, nutrients, meal_timestamp)
@@ -366,9 +367,9 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
                     await processing_msg.edit_text(answer)
                 
                 elif is_meal_description:
-                    # Parse meal description and log it
+                    # Parse meal description and log it - LLM provides nutrients
                     meal_timestamp = self.openai_service.parse_time_context(transcribed_text)
-                    result = self.openai_service.parse_meal_description(transcribed_text)
+                    result = self.openai_service.parse_meal_description_with_nutrients(transcribed_text)
                     food_items = result["food_items"]
                     
                     if not food_items:
@@ -377,8 +378,8 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
                         )
                         return
                     
-                    # Calculate nutrients
-                    nutrients = self.nutrition_db.estimate_nutrients(food_items)
+                    # Aggregate nutrients from LLM-provided data
+                    nutrients = self._aggregate_nutrients_from_items(food_items)
                     
                     # Save to diary
                     meal_id = self.meal_diary.add_meal(user_id, food_items, nutrients, meal_timestamp)
@@ -446,6 +447,48 @@ Respond naturally and helpfully. If it's unclear, ask clarifying questions. Keep
             await processing_msg.edit_text(
                 "❌ Sorry, I couldn't process your voice message. Could you try sending it again or type your message?"
             )
+    
+    def _aggregate_nutrients_from_items(self, food_items: List[Dict]) -> Dict[str, float]:
+        """
+        Aggregate nutrients from food items that already contain nutrition data from LLM.
+        
+        Args:
+            food_items: List of food items, each potentially containing 'nutrients' dict
+        
+        Returns:
+            Aggregated nutrient dictionary
+        """
+        total_nutrients = {
+            "calories": 0,
+            "protein_g": 0,
+            "carbohydrates_g": 0,
+            "fiber_g": 0,
+            "fat_g": 0,
+            "folate_mcg": 0,
+            "iron_mg": 0,
+            "calcium_mg": 0,
+            "vitamin_d_iu": 0,
+            "vitamin_c_mg": 0,
+            "vitamin_a_mcg": 0,
+            "vitamin_b12_mcg": 0,
+            "zinc_mg": 0,
+            "omega3_g": 0
+        }
+        
+        for item in food_items:
+            # If item has nutrients directly from LLM, use them
+            if "nutrients" in item and item["nutrients"]:
+                for nutrient, value in item["nutrients"].items():
+                    if nutrient in total_nutrients:
+                        total_nutrients[nutrient] += value
+            # Otherwise, fall back to database lookup (for backward compatibility)
+            elif "name" in item:
+                item_nutrients = self.nutrition_db.estimate_nutrients([item])
+                for nutrient, value in item_nutrients.items():
+                    if nutrient in total_nutrients:
+                        total_nutrients[nutrient] += value
+        
+        return total_nutrients
     
     def run(self):
         """Start the bot."""
