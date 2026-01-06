@@ -648,7 +648,8 @@ Return ONLY the JSON object. Estimate quantities if not specified. Use standard 
     
     def answer_nutrition_question(self, question: str, user_id: int, meal_diary, analyzer) -> str:
         """
-        Answer nutrition-related questions using context from user's meal diary.
+        Answer ANY question using full context from user's meal diary and profile.
+        The LLM has access to all data and decides how to respond.
         
         Args:
             question: User's question
@@ -663,48 +664,75 @@ Return ONLY the JSON object. Estimate quantities if not specified. Use standard 
         profile_context = pregnancy_profile.get_context_string()
         trimester_focus = pregnancy_profile.get_trimester_focus_nutrients()
         
-        # Get current nutrition status
+        # Get ACTUAL MEALS from database (not just totals)
         try:
+            # Get today's meals with details
+            daily_meals = meal_diary.get_daily_meals(user_id)
+            daily_meals_text = ""
+            if daily_meals:
+                daily_meals_text = "HEUTIGE MAHLZEITEN:\n"
+                for meal in daily_meals:
+                    time_str = meal['timestamp'][:16] if isinstance(meal['timestamp'], str) else meal['timestamp'].strftime('%H:%M')
+                    foods = meal.get('food_items', [])
+                    food_names = [f.get('name', 'Unbekannt') for f in foods] if isinstance(foods, list) else []
+                    daily_meals_text += f"- {time_str}: {', '.join(food_names)}\n"
+            else:
+                daily_meals_text = "HEUTIGE MAHLZEITEN: Noch keine Mahlzeiten eingetragen.\n"
+            
+            # Get weekly meals
+            weekly_meals = meal_diary.get_weekly_meals(user_id)
+            weekly_meals_text = ""
+            if weekly_meals:
+                weekly_meals_text = f"\nMAHLZEITEN DER LETZTEN 7 TAGE ({len(weekly_meals)} Mahlzeiten):\n"
+                # Group by date
+                from collections import defaultdict
+                meals_by_date = defaultdict(list)
+                for meal in weekly_meals:
+                    date_str = meal['timestamp'][:10] if isinstance(meal['timestamp'], str) else meal['timestamp'].strftime('%Y-%m-%d')
+                    foods = meal.get('food_items', [])
+                    food_names = [f.get('name', 'Unbekannt') for f in foods] if isinstance(foods, list) else []
+                    meals_by_date[date_str].extend(food_names)
+                
+                for date, foods in sorted(meals_by_date.items(), reverse=True)[:7]:
+                    weekly_meals_text += f"- {date}: {', '.join(foods[:5])}{'...' if len(foods) > 5 else ''}\n"
+            
+            # Get nutrient totals
             daily_analysis = analyzer.analyze_daily_intake(user_id)
             weekly_analysis = analyzer.analyze_weekly_intake(user_id)
             
             daily_totals = daily_analysis["totals"]
             daily_requirements = daily_analysis["requirements"]
-            daily_gaps = daily_analysis["gaps"]
             daily_missing = daily_analysis["missing_nutrients"]
             
             weekly_totals = weekly_analysis["totals"]
             weekly_requirements = weekly_analysis["requirements"]
-            weekly_gaps = weekly_analysis["gaps"]
-            weekly_missing = weekly_analysis["missing_nutrients"]
             
-            # Format context for AI
-            nutrition_context = f"""CURRENT NUTRITION STATUS:
+            # Format full context for AI
+            nutrition_context = f"""{daily_meals_text}
+{weekly_meals_text}
 
-DAILY (Today):
-- Calories: {daily_totals.get('calories', 0):.0f} / {daily_requirements.get('calories', 0):.0f}
+NÄHRSTOFF-ÜBERSICHT HEUTE:
+- Kalorien: {daily_totals.get('calories', 0):.0f} / {daily_requirements.get('calories', 0):.0f} kcal
 - Protein: {daily_totals.get('protein_g', 0):.1f}g / {daily_requirements.get('protein_g', 0):.1f}g
-- Iron: {daily_totals.get('iron_mg', 0):.1f}mg / {daily_requirements.get('iron_mg', 0):.1f}mg
-- Folate: {daily_totals.get('folate_mcg', 0):.1f}mcg / {daily_requirements.get('folate_mcg', 0):.1f}mcg
-- Calcium: {daily_totals.get('calcium_mg', 0):.1f}mg / {daily_requirements.get('calcium_mg', 0):.1f}mg
+- Eisen: {daily_totals.get('iron_mg', 0):.1f}mg / {daily_requirements.get('iron_mg', 0):.1f}mg
+- Folsäure: {daily_totals.get('folate_mcg', 0):.1f}mcg / {daily_requirements.get('folate_mcg', 0):.1f}mcg
+- Kalzium: {daily_totals.get('calcium_mg', 0):.1f}mg / {daily_requirements.get('calcium_mg', 0):.1f}mg
 
-Missing nutrients today: {', '.join([k.replace('_', ' ').title() for k, v in daily_missing.items() if v > 0]) if daily_missing else 'None'}
+Fehlende Nährstoffe heute: {', '.join([k.replace('_', ' ').title() for k, v in daily_missing.items() if v > 0]) if daily_missing else 'Keine - alles im grünen Bereich!'}
 
-WEEKLY (Past 7 days):
-- Calories: {weekly_totals.get('calories', 0):.0f} / {weekly_requirements.get('calories', 0):.0f}
+NÄHRSTOFF-ÜBERSICHT WOCHE:
+- Kalorien: {weekly_totals.get('calories', 0):.0f} / {weekly_requirements.get('calories', 0):.0f} kcal
 - Protein: {weekly_totals.get('protein_g', 0):.1f}g / {weekly_requirements.get('protein_g', 0):.1f}g
-- Iron: {weekly_totals.get('iron_mg', 0):.1f}mg / {weekly_requirements.get('iron_mg', 0):.1f}mg
-
-Missing nutrients this week: {', '.join([k.replace('_', ' ').title() for k, v in weekly_missing.items() if v > 0]) if weekly_missing else 'None'}
+- Eisen: {weekly_totals.get('iron_mg', 0):.1f}mg / {weekly_requirements.get('iron_mg', 0):.1f}mg
 """
         except Exception as e:
-            nutrition_context = "Nutrition data is not available yet (no meals logged)."
+            nutrition_context = "Noch keine Mahlzeiten eingetragen. Schick mir ein Foto oder beschreib mir was du gegessen hast!"
         
-        prompt = f"""You are a friendly, supportive nutritionist helping a pregnant woman. Answer her question based on her profile and current nutrition status.
+        prompt = f"""Du bist eine freundliche, unterstützende Ernährungsberaterin für eine schwangere Frau.
 
 {LANGUAGE_INSTRUCTION}
 
-IMPORTANT: You already KNOW all the pregnancy information below - use it directly to answer questions. Do NOT ask the user for information you already have.
+WICHTIG: Du hast VOLLSTÄNDIGEN ZUGRIFF auf alle Daten unten. Beantworte Fragen DIREKT mit den vorhandenen Informationen. Frage NICHT nach Infos die du bereits hast!
 
 {profile_context}
 
@@ -712,16 +740,16 @@ IMPORTANT: You already KNOW all the pregnancy information below - use it directl
 
 {nutrition_context}
 
-User's question: "{question}"
+Frage der Nutzerin: "{question}"
 
-Provide a helpful, encouraging, and specific answer considering her pregnancy stage. If she's asking about pregnancy week, due date, or trimester - you KNOW this information, answer directly! If she's asking about missing nutrients, be specific about what's missing and suggest foods to add. Keep it conversational and supportive."""
+Antworte hilfreich, ermutigend und spezifisch. Du KENNST alle Daten oben - nutze sie! Wenn sie nach Mahlzeiten fragt, liste sie auf. Wenn sie nach Nährstoffen fragt, sei konkret. Halte es gesprächig und unterstützend."""
         
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": f"You are a friendly, supportive nutritionist specializing in pregnancy nutrition. {LANGUAGE_INSTRUCTION} You have complete knowledge of this user's pregnancy profile and nutrition status - answer questions directly without asking for information you already have."
+                    "content": f"Du bist eine freundliche Ernährungsberaterin für Schwangere. {LANGUAGE_INSTRUCTION} Du hast VOLLSTÄNDIGEN Zugriff auf das Ernährungstagebuch und Schwangerschaftsprofil der Nutzerin. Beantworte alle Fragen direkt mit den vorhandenen Daten - frag nie nach Infos die du schon hast!"
                 },
                 {
                     "role": "user",
