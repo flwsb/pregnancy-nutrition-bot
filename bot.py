@@ -106,6 +106,49 @@ Questions? Just send a message and I'll help!
                 "❌ Sorry, I couldn't retrieve your weekly report. Please try again later."
             )
     
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle text messages - provide helpful responses."""
+        text = update.message.text.lower()
+        user_name = update.effective_user.first_name or "there"
+        
+        # Respond to common questions
+        if any(word in text for word in ['what can you do', 'what do you do', 'help', 'how']):
+            response = f"""Hi {user_name}! 👋
+
+I'm your Pregnancy Nutrition Tracker! Here's what I can do:
+
+📸 **Analyze Meal Photos**
+• Send me a photo of your meal
+• I'll identify the foods and log the nutrients
+
+📊 **Track Your Nutrition**
+• Use /diary to see today's summary
+• Use /weekly to see your weekly report
+
+💡 **Get Recommendations**
+• I'll suggest foods based on missing nutrients
+
+**Commands:**
+/start - Welcome message
+/diary - Today's nutrition summary
+/weekly - Weekly nutrition report
+/help - Show help
+
+Just send me a photo of your meal to get started! 📷"""
+        else:
+            response = f"""Hi {user_name}! 👋
+
+I help track nutrition during pregnancy by analyzing meal photos.
+
+**To get started:**
+• Send me a photo of your meal 📸
+• Or use /help to see all commands
+• Or use /start for a full introduction
+
+What would you like to do?"""
+        
+        await update.message.reply_text(response)
+    
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo messages - analyze meal images."""
         user_id = update.effective_user.id
@@ -177,6 +220,8 @@ Questions? Just send a message and I'll help!
         application.add_handler(CommandHandler("diary", self.diary_command))
         application.add_handler(CommandHandler("weekly", self.weekly_command))
         application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
+        # Handle text messages (must be last to catch non-command text)
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         
         # Start bot
         logger.info("Bot starting...")
