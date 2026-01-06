@@ -2,11 +2,14 @@
 # psycopg2-binary is pre-compiled and doesn't need PostgreSQL dev libraries
 
 [phases.setup]
-nixPkgs = ["python39"]
+nixPkgs = ["python39", "python39Packages.pip"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+dependsOn = ["setup"]
+cmds = ["python -m venv /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt"]
+
+[phases.build]
+dependsOn = ["install"]
 
 [start]
-cmd = "python3 bot.py"
-
+cmd = ". /opt/venv/bin/activate && python3 bot.py"
