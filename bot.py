@@ -33,50 +33,62 @@ class PregnancyNutritionBot:
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
-        welcome_message = """
-👋 Welcome to Pregnancy Nutrition Tracker!
+        from pregnancy_profile import pregnancy_profile
+        week = pregnancy_profile.get_current_week()
+        trimester = pregnancy_profile.get_trimester_name()
+        
+        welcome_message = f"""
+👋 Willkommen beim Schwangerschafts-Ernährungs-Tracker!
 
-I help you track your nutrition during pregnancy by analyzing photos of your meals.
+🤰 Du bist in Woche {week} ({trimester} Trimester) - ich bin hier um dir zu helfen!
 
-📸 **How to use:**
-• Send me a photo of your meal
-• I'll analyze it and log the nutrients
-• Use /diary to see today's summary
-• Use /weekly to see your weekly report
+Ich analysiere Fotos von deinen Mahlzeiten und tracke deine Nährstoffaufnahme.
 
-💡 **Commands:**
-/start - Show this welcome message
-/diary - View today's nutrition summary
-/weekly - View weekly nutrition report
-/help - Show help information
+📸 **So funktioniert's:**
+• Schick mir ein Foto deiner Mahlzeit
+• Oder beschreibe mir was du gegessen hast
+• Ich analysiere es und tracke die Nährstoffe
+• Du kannst auch Sprachnachrichten schicken!
 
-Let's get started! Send me a photo of your next meal! 📷
+💡 **Befehle:**
+/start - Diese Willkommensnachricht
+/diary - Heutige Ernährungsübersicht
+/weekly - Wöchentlicher Ernährungsbericht
+/help - Hilfe anzeigen
+
+Schick mir einfach ein Foto von deiner nächsten Mahlzeit! 📷
 """
         await update.message.reply_text(welcome_message)
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
         help_text = """
-📖 **Help - Pregnancy Nutrition Tracker**
+📖 **Hilfe - Schwangerschafts-Ernährungs-Tracker**
 
-**Commands:**
-/start - Welcome message and instructions
-/diary - View today's nutrition summary
-/weekly - View weekly nutrition report
-/help - Show this help message
+**Befehle:**
+/start - Willkommensnachricht
+/diary - Heutige Ernährungsübersicht
+/weekly - Wöchentlicher Bericht
+/help - Diese Hilfe
 
-**How it works:**
-1. 📸 Take a photo of your meal
-2. 🤖 I analyze it using AI
-3. 📊 Nutrients are automatically logged
-4. 💡 Get personalized recommendations
+**So funktioniert's:**
+1. 📸 Foto von deiner Mahlzeit schicken
+2. 🤖 KI analysiert die Mahlzeit
+3. 📊 Nährstoffe werden automatisch getrackt
+4. 💡 Personalisierte Empfehlungen erhalten
 
-**Tips:**
-• Take clear photos with good lighting
-• Include all items in your meal
-• Check your diary regularly to track progress
+**Du kannst auch:**
+• Mahlzeiten mit Text beschreiben ("Ich hatte Hähnchen mit Reis")
+• Sprachnachrichten schicken
+• Fragen stellen ("Welche Nährstoffe fehlen mir?")
+• Nach deiner Schwangerschaftswoche fragen
 
-Questions? Just send a message and I'll help!
+**Tipps:**
+• Mach klare Fotos mit guter Beleuchtung
+• Zeig alle Bestandteile der Mahlzeit
+• Schau regelmäßig in dein Tagebuch
+
+Fragen? Schreib mir einfach eine Nachricht!
 """
         await update.message.reply_text(help_text)
     
@@ -114,24 +126,35 @@ Questions? Just send a message and I'll help!
         user_name = update.effective_user.first_name or "there"
         text = update.message.text
         
-        # Check if it's a nutrition question
+        # Check if it's a nutrition question (English + German)
         text_lower = text.lower()
         is_nutrition_question = any(phrase in text_lower for phrase in [
+            # English
             'nutrient', 'missing', 'what should i eat', 'what am i missing',
             'what do i need', 'recommendation', 'suggestion', 'what nutrients',
-            'deficient', 'low in', 'need more'
+            'deficient', 'low in', 'need more', 'pregnancy week', 'trimester',
+            # German
+            'nährstoff', 'fehlt', 'was soll ich essen', 'was fehlt mir',
+            'was brauche ich', 'empfehlung', 'vorschlag', 'welche nährstoffe',
+            'mangel', 'brauche mehr', 'schwangerschaftswoche', 'welche woche',
+            'woche bin ich', 'trimester', 'wie weit', 'wie lange noch'
         ])
         
-        # Check if it's a meal description
+        # Check if it's a meal description (English + German)
         is_meal_description = any(phrase in text_lower for phrase in [
+            # English
             'ate', 'had', 'eating', 'meal', 'breakfast', 'lunch', 'dinner',
-            'snack', 'food', 'chicken', 'rice', 'salad', 'soup'
+            'snack', 'food', 'chicken', 'rice', 'salad', 'soup',
+            # German
+            'gegessen', 'hatte', 'esse', 'mahlzeit', 'frühstück', 'mittagessen',
+            'abendessen', 'snack', 'essen', 'hähnchen', 'reis', 'salat', 'suppe',
+            'brot', 'ei', 'eier', 'joghurt', 'obst', 'gemüse'
         ])
         
         if is_nutrition_question:
             # Answer nutrition questions with context
             try:
-                response = await update.message.reply_text("💭 Let me check your nutrition status...")
+                response = await update.message.reply_text("💭 Lass mich deinen Ernährungsstatus prüfen...")
                 answer = self.openai_service.answer_nutrition_question(
                     text, user_id, self.meal_diary, self.analyzer
                 )
@@ -139,14 +162,14 @@ Questions? Just send a message and I'll help!
             except Exception as e:
                 logger.error(f"Error answering nutrition question: {e}", exc_info=True)
                 await update.message.reply_text(
-                    "❌ Sorry, I couldn't analyze your nutrition status. Try asking again or use /diary to see your summary."
+                    "❌ Entschuldigung, ich konnte deinen Ernährungsstatus nicht analysieren. Versuch es nochmal oder nutze /diary für deine Übersicht."
                 )
         
         elif is_meal_description:
             # Parse meal description and log it
             try:
                 processing_msg = await update.message.reply_text(
-                    "🍽️ Processing your meal description..."
+                    "🍽️ Ich analysiere deine Mahlzeit..."
                 )
                 
                 # Parse time context
@@ -158,7 +181,7 @@ Questions? Just send a message and I'll help!
                 
                 if not food_items:
                     await processing_msg.edit_text(
-                        "❌ I couldn't identify any foods in your description. Could you describe your meal more specifically?"
+                        "❌ Ich konnte keine Lebensmittel erkennen. Kannst du deine Mahlzeit genauer beschreiben?"
                     )
                     return
                 
@@ -176,56 +199,66 @@ Questions? Just send a message and I'll help!
                 
                 time_info = ""
                 if meal_timestamp and meal_timestamp.date() != datetime.now().date():
-                    time_info = f"\n📅 Logged for: {meal_timestamp.strftime('%B %d, %Y at %I:%M %p')}\n"
+                    time_info = f"\n📅 Eingetragen für: {meal_timestamp.strftime('%d.%m.%Y um %H:%M')}\n"
                 
-                response = f"✅ Meal logged successfully!{time_info}\n\n"
-                response += f"📝 Foods identified:\n{food_list}\n\n"
-                response += f"📊 Key nutrients:\n"
-                response += f"• Calories: {nutrients.get('calories', 0):.0f} kcal\n"
+                response = f"✅ Mahlzeit erfolgreich gespeichert!{time_info}\n\n"
+                response += f"📝 Erkannte Lebensmittel:\n{food_list}\n\n"
+                response += f"📊 Wichtige Nährstoffe:\n"
+                response += f"• Kalorien: {nutrients.get('calories', 0):.0f} kcal\n"
                 response += f"• Protein: {nutrients.get('protein_g', 0):.1f}g\n"
-                response += f"• Iron: {nutrients.get('iron_mg', 0):.1f}mg\n"
-                response += f"• Folate: {nutrients.get('folate_mcg', 0):.1f}mcg\n"
-                response += f"• Calcium: {nutrients.get('calcium_mg', 0):.1f}mg\n\n"
-                response += f"💡 Ask me 'what nutrients am I missing?' to get personalized recommendations!"
+                response += f"• Eisen: {nutrients.get('iron_mg', 0):.1f}mg\n"
+                response += f"• Folsäure: {nutrients.get('folate_mcg', 0):.1f}mcg\n"
+                response += f"• Kalzium: {nutrients.get('calcium_mg', 0):.1f}mg\n\n"
+                response += f"💡 Frag mich 'Welche Nährstoffe fehlen mir?' für personalisierte Empfehlungen!"
                 
                 await processing_msg.edit_text(response)
                 
             except Exception as e:
                 logger.error(f"Error processing meal description: {e}", exc_info=True)
                 await update.message.reply_text(
-                    "❌ Sorry, I couldn't process your meal description. Could you try describing it differently?"
+                    "❌ Entschuldigung, ich konnte deine Mahlzeit nicht verarbeiten. Kannst du es anders beschreiben?"
                 )
         
         else:
             # General conversation - use AI to respond
             try:
+                from pregnancy_profile import pregnancy_profile, LANGUAGE_INSTRUCTION
+                profile_context = pregnancy_profile.get_context_string()
+                
                 # Get context about user's nutrition
                 try:
                     daily_analysis = self.analyzer.analyze_daily_intake(user_id)
-                    context = f"User has logged {daily_analysis['meal_count']} meals today."
+                    nutrition_context = f"Die Nutzerin hat heute {daily_analysis['meal_count']} Mahlzeiten eingetragen."
                 except:
-                    context = "User is just getting started."
+                    nutrition_context = "Die Nutzerin fängt gerade erst an."
                 
-                prompt = f"""You are a friendly, supportive nutritionist helping a pregnant woman track her nutrition. 
-                
-{context}
+                prompt = f"""Du bist eine freundliche, unterstützende Ernährungsberaterin für Schwangere.
 
-User said: "{text}"
+{LANGUAGE_INSTRUCTION}
 
-Respond naturally and helpfully. If they're asking what you can do, explain you can:
-- Analyze meal photos
-- Understand meal descriptions (text or voice)
-- Answer nutrition questions
-- Track nutrients and suggest what's missing
+WICHTIG: Du KENNST bereits alle Informationen über die Schwangerschaft - beantworte Fragen DIREKT ohne nachzufragen!
 
-Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max)."""
+{profile_context}
+
+{nutrition_context}
+
+Nutzerin sagte: "{text}"
+
+Antworte natürlich und hilfreich auf Deutsch. Wenn sie fragt was du kannst, erkläre:
+- Mahlzeitenfotos analysieren
+- Mahlzeiten-Beschreibungen verstehen (Text oder Sprache)
+- Fragen zur Ernährung beantworten
+- Nährstoffe tracken und fehlende vorschlagen
+- Fragen zur Schwangerschaftswoche beantworten
+
+Halte es gesprächig, ermutigend und unterstützend. Sei kurz (2-3 Sätze max)."""
 
                 ai_response = self.openai_service.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are a friendly, supportive nutritionist specializing in pregnancy nutrition."
+                            "content": f"Du bist eine freundliche, unterstützende Ernährungsberaterin für Schwangerschaft. {LANGUAGE_INSTRUCTION} Du kennst alle Informationen über diese Nutzerin - beantworte Fragen direkt!"
                         },
                         {
                             "role": "user",
@@ -242,12 +275,12 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
             except Exception as e:
                 logger.error(f"Error in conversational response: {e}", exc_info=True)
                 await update.message.reply_text(
-                    f"Hi {user_name}! 👋\n\nI can help you track your nutrition! Send me:\n"
-                    "• 📸 A photo of your meal\n"
-                    "• 🗣️ A voice message describing your meal\n"
-                    "• 💬 Text describing what you ate\n"
-                    "• ❓ Questions like 'what nutrients am I missing?'\n\n"
-                    "Try asking me 'what nutrients am I missing?' to get personalized recommendations!"
+                    f"Hallo {user_name}! 👋\n\nIch kann dir bei der Ernährung helfen! Schick mir:\n"
+                    "• 📸 Ein Foto deiner Mahlzeit\n"
+                    "• 🗣️ Eine Sprachnachricht mit deiner Mahlzeit\n"
+                    "• 💬 Text mit was du gegessen hast\n"
+                    "• ❓ Fragen wie 'Welche Nährstoffe fehlen mir?'\n\n"
+                    "Frag mich 'Welche Nährstoffe fehlen mir?' für personalisierte Empfehlungen!"
                 )
     
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -263,7 +296,7 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
         
         # Send processing message
         processing_msg = await update.message.reply_text(
-            "🔍 Analyzing your meal... This may take a moment."
+            "🔍 Ich analysiere deine Mahlzeit... Einen Moment bitte."
         )
         
         try:
@@ -295,17 +328,17 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
                 
                 time_info = ""
                 if meal_timestamp and meal_timestamp.date() != datetime.now().date():
-                    time_info = f"\n📅 Logged for: {meal_timestamp.strftime('%B %d, %Y at %I:%M %p')}\n"
+                    time_info = f"\n📅 Eingetragen für: {meal_timestamp.strftime('%d.%m.%Y um %H:%M')}\n"
                 
-                response = f"✅ Meal logged successfully!{time_info}\n\n"
-                response += f"📝 Foods identified:\n{food_list}\n\n"
-                response += f"📊 Key nutrients:\n"
-                response += f"• Calories: {nutrients.get('calories', 0):.0f} kcal\n"
+                response = f"✅ Mahlzeit erfolgreich gespeichert!{time_info}\n\n"
+                response += f"📝 Erkannte Lebensmittel:\n{food_list}\n\n"
+                response += f"📊 Wichtige Nährstoffe:\n"
+                response += f"• Kalorien: {nutrients.get('calories', 0):.0f} kcal\n"
                 response += f"• Protein: {nutrients.get('protein_g', 0):.1f}g\n"
-                response += f"• Iron: {nutrients.get('iron_mg', 0):.1f}mg\n"
-                response += f"• Folate: {nutrients.get('folate_mcg', 0):.1f}mcg\n"
-                response += f"• Calcium: {nutrients.get('calcium_mg', 0):.1f}mg\n\n"
-                response += f"💡 Ask me 'what nutrients am I missing?' to get personalized recommendations!"
+                response += f"• Eisen: {nutrients.get('iron_mg', 0):.1f}mg\n"
+                response += f"• Folsäure: {nutrients.get('folate_mcg', 0):.1f}mcg\n"
+                response += f"• Kalzium: {nutrients.get('calcium_mg', 0):.1f}mg\n\n"
+                response += f"💡 Frag mich 'Welche Nährstoffe fehlen mir?' für personalisierte Empfehlungen!"
                 
                 await processing_msg.edit_text(response)
                 
@@ -317,17 +350,17 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
         except Exception as e:
             logger.error(f"Error processing photo: {e}", exc_info=True)
             await processing_msg.edit_text(
-                "❌ Sorry, I couldn't analyze your meal photo. Please try again with a clearer image."
+                "❌ Entschuldigung, ich konnte dein Foto nicht analysieren. Versuch es mit einem klareren Bild."
             )
     
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle voice messages - transcribe and process."""
         user_id = update.effective_user.id
-        user_name = update.effective_user.first_name or "there"
+        user_name = update.effective_user.first_name or "dort"
         
         # Send processing message
         processing_msg = await update.message.reply_text(
-            "🎤 Transcribing your voice message..."
+            "🎤 Ich transkribiere deine Sprachnachricht..."
         )
         
         try:
@@ -345,18 +378,29 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
                 transcribed_text = self.openai_service.transcribe_voice(str(tmp_path))
                 
                 # Update processing message
-                await processing_msg.edit_text(f"📝 You said: \"{transcribed_text}\"\n\nProcessing...")
+                await processing_msg.edit_text(f"📝 Du hast gesagt: \"{transcribed_text}\"\n\nIch verarbeite das...")
                 
-                # Check if it's a question or meal description
+                # Check if it's a question or meal description (English + German)
                 text_lower = transcribed_text.lower()
                 is_nutrition_question = any(phrase in text_lower for phrase in [
+                    # English
                     'nutrient', 'missing', 'what should i eat', 'what am i missing',
-                    'what do i need', 'recommendation', 'suggestion', 'what nutrients'
+                    'what do i need', 'recommendation', 'suggestion', 'what nutrients',
+                    'pregnancy week', 'trimester',
+                    # German
+                    'nährstoff', 'fehlt', 'was soll ich essen', 'was fehlt mir',
+                    'was brauche ich', 'empfehlung', 'vorschlag', 'welche nährstoffe',
+                    'schwangerschaftswoche', 'welche woche', 'woche bin ich', 'trimester'
                 ])
                 
                 is_meal_description = any(phrase in text_lower for phrase in [
+                    # English
                     'ate', 'had', 'eating', 'meal', 'breakfast', 'lunch', 'dinner',
-                    'snack', 'food', 'chicken', 'rice', 'salad', 'soup'
+                    'snack', 'food', 'chicken', 'rice', 'salad', 'soup',
+                    # German
+                    'gegessen', 'hatte', 'esse', 'mahlzeit', 'frühstück', 'mittagessen',
+                    'abendessen', 'snack', 'essen', 'hähnchen', 'reis', 'salat', 'suppe',
+                    'brot', 'ei', 'eier', 'joghurt', 'obst', 'gemüse'
                 ])
                 
                 if is_nutrition_question:
@@ -374,7 +418,7 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
                     
                     if not food_items:
                         await processing_msg.edit_text(
-                            "❌ I couldn't identify any foods in your description. Could you describe your meal more specifically?"
+                            "❌ Ich konnte keine Lebensmittel erkennen. Kannst du deine Mahlzeit genauer beschreiben?"
                         )
                         return
                     
@@ -392,33 +436,44 @@ Keep it conversational, encouraging, and supportive. Be brief (2-3 sentences max
                     
                     time_info = ""
                     if meal_timestamp and meal_timestamp.date() != datetime.now().date():
-                        time_info = f"\n📅 Logged for: {meal_timestamp.strftime('%B %d, %Y at %I:%M %p')}\n"
+                        time_info = f"\n📅 Eingetragen für: {meal_timestamp.strftime('%d.%m.%Y um %H:%M')}\n"
                     
-                    response = f"✅ Meal logged successfully!{time_info}\n\n"
-                    response += f"📝 Foods identified:\n{food_list}\n\n"
-                    response += f"📊 Key nutrients:\n"
-                    response += f"• Calories: {nutrients.get('calories', 0):.0f} kcal\n"
+                    response = f"✅ Mahlzeit erfolgreich gespeichert!{time_info}\n\n"
+                    response += f"📝 Erkannte Lebensmittel:\n{food_list}\n\n"
+                    response += f"📊 Wichtige Nährstoffe:\n"
+                    response += f"• Kalorien: {nutrients.get('calories', 0):.0f} kcal\n"
                     response += f"• Protein: {nutrients.get('protein_g', 0):.1f}g\n"
-                    response += f"• Iron: {nutrients.get('iron_mg', 0):.1f}mg\n"
-                    response += f"• Folate: {nutrients.get('folate_mcg', 0):.1f}mcg\n"
-                    response += f"• Calcium: {nutrients.get('calcium_mg', 0):.1f}mg\n\n"
-                    response += f"💡 Ask me 'what nutrients am I missing?' to get personalized recommendations!"
+                    response += f"• Eisen: {nutrients.get('iron_mg', 0):.1f}mg\n"
+                    response += f"• Folsäure: {nutrients.get('folate_mcg', 0):.1f}mcg\n"
+                    response += f"• Kalzium: {nutrients.get('calcium_mg', 0):.1f}mg\n\n"
+                    response += f"💡 Frag mich 'Welche Nährstoffe fehlen mir?' für personalisierte Empfehlungen!"
                     
                     await processing_msg.edit_text(response)
                 
                 else:
                     # General conversation - respond conversationally
                     try:
-                        prompt = f"""You are a friendly, supportive nutritionist helping a pregnant woman. She just sent you a voice message saying: "{transcribed_text}"
+                        from pregnancy_profile import pregnancy_profile, LANGUAGE_INSTRUCTION
+                        profile_context = pregnancy_profile.get_context_string()
+                        
+                        prompt = f"""Du bist eine freundliche, unterstützende Ernährungsberaterin für Schwangere.
 
-Respond naturally and helpfully. If it's unclear, ask clarifying questions. Keep it brief (2-3 sentences)."""
+{LANGUAGE_INSTRUCTION}
+
+WICHTIG: Du KENNST bereits alle Informationen über die Schwangerschaft - beantworte Fragen DIREKT!
+
+{profile_context}
+
+Sie hat dir gerade eine Sprachnachricht geschickt: "{transcribed_text}"
+
+Antworte natürlich und hilfreich auf Deutsch. Falls unklar, stelle Rückfragen. Kurz halten (2-3 Sätze)."""
 
                         ai_response = self.openai_service.client.chat.completions.create(
                             model="gpt-4o-mini",
                             messages=[
                                 {
                                     "role": "system",
-                                    "content": "You are a friendly, supportive nutritionist specializing in pregnancy nutrition."
+                                    "content": f"Du bist eine freundliche, unterstützende Ernährungsberaterin für Schwangerschaft. {LANGUAGE_INSTRUCTION}"
                                 },
                                 {
                                     "role": "user",
@@ -433,8 +488,8 @@ Respond naturally and helpfully. If it's unclear, ask clarifying questions. Keep
                         await processing_msg.edit_text(response)
                     except:
                         await processing_msg.edit_text(
-                            "I heard you! Could you tell me more about what you'd like help with? "
-                            "You can describe a meal, ask about nutrients, or ask me questions!"
+                            "Ich hab dich gehört! Erzähl mir mehr über was du Hilfe brauchst - "
+                            "beschreib eine Mahlzeit, frag nach Nährstoffen oder stell mir Fragen!"
                         )
                 
             finally:
@@ -445,7 +500,7 @@ Respond naturally and helpfully. If it's unclear, ask clarifying questions. Keep
         except Exception as e:
             logger.error(f"Error processing voice: {e}", exc_info=True)
             await processing_msg.edit_text(
-                "❌ Sorry, I couldn't process your voice message. Could you try sending it again or type your message?"
+                "❌ Entschuldigung, ich konnte deine Sprachnachricht nicht verarbeiten. Versuch es nochmal oder schreib mir eine Textnachricht."
             )
     
     def _aggregate_nutrients_from_items(self, food_items: List[Dict]) -> Dict[str, float]:

@@ -113,18 +113,20 @@ class NutritionAnalyzer:
         
         # Add pregnancy context
         week = pregnancy_profile.get_current_week()
-        trimester = pregnancy_profile.get_trimester_name()
+        trimester_num = pregnancy_profile.get_trimester()
+        trimester_names_de = {1: "Erstes", 2: "Zweites", 3: "Drittes"}
+        trimester_de = trimester_names_de.get(trimester_num, "Erstes")
         
-        summary = f"📊 Daily Nutrition Summary ({meal_count} meals logged)\n"
-        summary += f"🤰 Week {week} ({trimester} Trimester)\n\n"
+        summary = f"📊 Tagesübersicht Ernährung ({meal_count} Mahlzeiten)\n"
+        summary += f"🤰 Woche {week} ({trimester_de} Trimester)\n\n"
         
-        # Key nutrients to highlight
+        # Key nutrients to highlight (German names)
         key_nutrients = [
-            ("calories", "Calories", ""),
+            ("calories", "Kalorien", ""),
             ("protein_g", "Protein", "g"),
-            ("iron_mg", "Iron", "mg"),
-            ("folate_mcg", "Folate", "mcg"),
-            ("calcium_mg", "Calcium", "mg"),
+            ("iron_mg", "Eisen", "mg"),
+            ("folate_mcg", "Folsäure", "mcg"),
+            ("calcium_mg", "Kalzium", "mg"),
             ("vitamin_c_mg", "Vitamin C", "mg")
         ]
         
@@ -140,10 +142,10 @@ class NutritionAnalyzer:
         summary += "\n"
         
         if analysis["missing_nutrients"]:
-            summary += "💡 Recommendations:\n"
+            summary += "💡 Empfehlungen:\n"
             summary += analysis["recommendations"]
         else:
-            summary += "🎉 Great job! You're meeting all your nutritional targets today!"
+            summary += "🎉 Super! Du erreichst heute alle Nährstoffziele!"
         
         return summary
     
@@ -164,19 +166,21 @@ class NutritionAnalyzer:
         
         # Add pregnancy context
         week = pregnancy_profile.get_current_week()
-        trimester = pregnancy_profile.get_trimester_name()
+        trimester_num = pregnancy_profile.get_trimester()
+        trimester_names_de = {1: "Erstes", 2: "Zweites", 3: "Drittes"}
+        trimester_de = trimester_names_de.get(trimester_num, "Erstes")
         focus_nutrients = pregnancy_profile.get_trimester_focus_nutrients()
         
-        summary = f"📊 Weekly Nutrition Summary ({meal_count} meals logged)\n"
-        summary += f"🤰 Week {week} ({trimester} Trimester)\n\n"
+        summary = f"📊 Wochenübersicht Ernährung ({meal_count} Mahlzeiten)\n"
+        summary += f"🤰 Woche {week} ({trimester_de} Trimester)\n\n"
         
-        # Key nutrients to highlight
+        # Key nutrients to highlight (German names)
         key_nutrients = [
-            ("calories", "Calories", ""),
+            ("calories", "Kalorien", ""),
             ("protein_g", "Protein", "g"),
-            ("iron_mg", "Iron", "mg"),
-            ("folate_mcg", "Folate", "mcg"),
-            ("calcium_mg", "Calcium", "mg"),
+            ("iron_mg", "Eisen", "mg"),
+            ("folate_mcg", "Folsäure", "mcg"),
+            ("calcium_mg", "Kalzium", "mg"),
             ("vitamin_c_mg", "Vitamin C", "mg")
         ]
         
@@ -192,10 +196,10 @@ class NutritionAnalyzer:
         summary += "\n"
         
         if analysis["missing_nutrients"]:
-            summary += "💡 Recommendations for next week:\n"
+            summary += "💡 Empfehlungen für nächste Woche:\n"
             summary += analysis["recommendations"]
         else:
-            summary += "🎉 Excellent! You're meeting all your weekly nutritional targets!"
+            summary += "🎉 Ausgezeichnet! Du erreichst alle wöchentlichen Nährstoffziele!"
         
         return summary
 

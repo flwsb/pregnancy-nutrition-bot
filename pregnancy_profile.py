@@ -2,6 +2,10 @@
 from datetime import datetime, date
 from typing import Dict, Optional
 
+# Language setting - all bot responses will be in this language
+LANGUAGE = "German"
+LANGUAGE_INSTRUCTION = f"IMPORTANT: Always respond in {LANGUAGE}."
+
 
 class PregnancyProfile:
     """Stores and calculates pregnancy-specific information."""
@@ -12,7 +16,7 @@ class PregnancyProfile:
         self.age = 31
         self.weight_kg = 63
         self.height_cm = None  # Can be added if needed
-        self.health_status = "healthy, good shape"
+        self.health_status = "gesund und in guter Form"
         
         # Pregnancy information
         # Week 5 on Jan 6, 2026 means pregnancy started around Dec 2, 2025
@@ -46,15 +50,16 @@ class PregnancyProfile:
         """Get a formatted string with pregnancy context for LLM prompts."""
         week = self.get_current_week()
         trimester = self.get_trimester()
-        trimester_name = self.get_trimester_name()
+        trimester_names_de = {1: "Erstes", 2: "Zweites", 3: "Drittes"}
+        trimester_name = trimester_names_de.get(trimester, "Erstes")
         
-        return f"""PREGNANCY PROFILE:
-- Age: {self.age} years old
-- Weight: {self.weight_kg} kg
-- Health status: {self.health_status}
-- Current pregnancy week: {week}
-- Trimester: {trimester_name} trimester (trimester {trimester})
-- Due date: {self.due_date.strftime('%B %d, %Y')}"""
+        return f"""SCHWANGERSCHAFTSPROFIL:
+- Alter: {self.age} Jahre
+- Gewicht: {self.weight_kg} kg
+- Gesundheitszustand: {self.health_status}
+- Aktuelle Schwangerschaftswoche: {week}
+- Trimester: {trimester_name} Trimester (Trimester {trimester})
+- Errechneter Geburtstermin: {self.due_date.strftime('%d.%m.%Y')}"""
 
     def get_adjusted_requirements(self) -> Dict[str, float]:
         """
@@ -102,30 +107,30 @@ class PregnancyProfile:
         return requirements
     
     def get_trimester_focus_nutrients(self) -> str:
-        """Get key nutrients to focus on for current trimester."""
+        """Get key nutrients to focus on for current trimester (in German)."""
         trimester = self.get_trimester()
         
         if trimester == 1:
-            return """Key nutrients for First Trimester:
-- FOLATE (600mcg): Critical for baby's neural tube development
-- Vitamin B6: Helps with nausea
-- Iron: Building blood supply
-- Zinc: Cell development
-- Small, frequent meals may help with nausea"""
+            return """Wichtige Nährstoffe für das Erste Trimester:
+- FOLSÄURE (600mcg): Kritisch für die Entwicklung des Neuralrohrs
+- Vitamin B6: Hilft gegen Übelkeit
+- Eisen: Aufbau der Blutversorgung
+- Zink: Zellentwicklung
+- Kleine, häufige Mahlzeiten können bei Übelkeit helfen"""
         elif trimester == 2:
-            return """Key nutrients for Second Trimester:
-- CALCIUM (1000mg): Baby's bones are developing
-- Vitamin D: Helps calcium absorption
-- PROTEIN (75g+): Baby is growing rapidly
-- Iron: Increased blood volume
-- Omega-3: Brain development"""
+            return """Wichtige Nährstoffe für das Zweite Trimester:
+- KALZIUM (1000mg): Babys Knochen entwickeln sich
+- Vitamin D: Hilft bei der Kalziumaufnahme
+- PROTEIN (75g+): Baby wächst schnell
+- Eisen: Erhöhtes Blutvolumen
+- Omega-3: Gehirnentwicklung"""
         else:
-            return """Key nutrients for Third Trimester:
-- IRON (30mg): Preparing for delivery, preventing anemia
-- PROTEIN (80g+): Baby's final growth spurt
-- Calcium: Baby storing calcium for bones
-- DHA/Omega-3: Brain development continues
-- Fiber: Helps with common constipation"""
+            return """Wichtige Nährstoffe für das Dritte Trimester:
+- EISEN (30mg): Vorbereitung auf die Geburt, Anämie vorbeugen
+- PROTEIN (80g+): Baby's letzter Wachstumsschub
+- Kalzium: Baby speichert Kalzium für Knochen
+- DHA/Omega-3: Gehirnentwicklung geht weiter
+- Ballaststoffe: Helfen bei häufiger Verstopfung"""
 
 
 # Global profile instance

@@ -5,7 +5,7 @@ from openai import OpenAI
 from config import OPENAI_API_KEY
 from datetime import datetime, timedelta
 import re
-from pregnancy_profile import pregnancy_profile
+from pregnancy_profile import pregnancy_profile, LANGUAGE, LANGUAGE_INSTRUCTION
 
 
 class OpenAIService:
@@ -431,6 +431,8 @@ Return ONLY the JSON object, no other text. Include all foods with their estimat
         
         prompt = f"""You are a nutritionist helping a pregnant woman optimize her diet.
 
+{LANGUAGE_INSTRUCTION}
+
 {profile_context}
 
 {trimester_focus}
@@ -457,7 +459,7 @@ Provide 2-3 specific, practical meal or snack suggestions that would help addres
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a friendly, supportive nutritionist specializing in pregnancy nutrition. Provide practical, encouraging advice."
+                    "content": f"You are a friendly, supportive nutritionist specializing in pregnancy nutrition. {LANGUAGE_INSTRUCTION} Provide practical, encouraging advice."
                 },
                 {
                     "role": "user",
@@ -484,7 +486,7 @@ Provide 2-3 specific, practical meal or snack suggestions that would help addres
             transcript = self.client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
-                language="en"
+                language="de"  # German transcription
             )
         return transcript.text
     
@@ -535,6 +537,7 @@ Return ONLY the JSON object. Estimate quantities if not specified. Use standard 
     def parse_time_context(self, text: str) -> Optional[datetime]:
         """
         Parse time context from text (e.g., "today's lunch", "yesterday's breakfast").
+        Supports both English and German time expressions.
         
         Args:
             text: Text that may contain time references
@@ -548,35 +551,44 @@ Return ONLY the JSON object. Estimate quantities if not specified. Use standard 
         text_lower = text.lower()
         now = datetime.now()
         
-        # Today's meals
-        if "today" in text_lower or "this" in text_lower:
-            # Default to current time if it's today
-            return now
+        # Helper function to determine meal time
+        def get_meal_time(text_lower: str, base_date: datetime) -> datetime:
+            # Breakfast (English + German)
+            if any(term in text_lower for term in ["breakfast", "frühstück", "fruehstueck"]):
+                return base_date.replace(hour=8, minute=0, second=0, microsecond=0)
+            # Lunch (English + German)
+            elif any(term in text_lower for term in ["lunch", "mittagessen", "mittag"]):
+                return base_date.replace(hour=13, minute=0, second=0, microsecond=0)
+            # Dinner (English + German)
+            elif any(term in text_lower for term in ["dinner", "supper", "abendessen", "abend"]):
+                return base_date.replace(hour=19, minute=0, second=0, microsecond=0)
+            # Snack (English + German)
+            elif any(term in text_lower for term in ["snack", "zwischenmahlzeit", "snacks"]):
+                return base_date.replace(hour=15, minute=0, second=0, microsecond=0)
+            return base_date.replace(hour=12, minute=0, second=0, microsecond=0)
         
-        # Yesterday
-        if "yesterday" in text_lower:
+        # Today's meals (English + German: "heute")
+        if any(term in text_lower for term in ["today", "this", "heute", "jetzt", "gerade"]):
+            return get_meal_time(text_lower, now)
+        
+        # Yesterday (English + German: "gestern")
+        if any(term in text_lower for term in ["yesterday", "gestern"]):
             yesterday = now - timedelta(days=1)
-            # Try to parse meal time
-            if "breakfast" in text_lower:
-                return yesterday.replace(hour=8, minute=0, second=0, microsecond=0)
-            elif "lunch" in text_lower:
-                return yesterday.replace(hour=13, minute=0, second=0, microsecond=0)
-            elif "dinner" in text_lower or "supper" in text_lower:
-                return yesterday.replace(hour=19, minute=0, second=0, microsecond=0)
-            return yesterday.replace(hour=12, minute=0, second=0, microsecond=0)
+            return get_meal_time(text_lower, yesterday)
         
-        # Days ago
+        # Day before yesterday (German: "vorgestern")
+        if "vorgestern" in text_lower:
+            day_before = now - timedelta(days=2)
+            return get_meal_time(text_lower, day_before)
+        
+        # Days ago (English + German: "vor X tagen")
         days_match = re.search(r'(\d+)\s+days?\s+ago', text_lower)
+        if not days_match:
+            days_match = re.search(r'vor\s+(\d+)\s+tag', text_lower)
         if days_match:
             days = int(days_match.group(1))
             past_date = now - timedelta(days=days)
-            if "breakfast" in text_lower:
-                return past_date.replace(hour=8, minute=0, second=0, microsecond=0)
-            elif "lunch" in text_lower:
-                return past_date.replace(hour=13, minute=0, second=0, microsecond=0)
-            elif "dinner" in text_lower or "supper" in text_lower:
-                return past_date.replace(hour=19, minute=0, second=0, microsecond=0)
-            return past_date.replace(hour=12, minute=0, second=0, microsecond=0)
+            return get_meal_time(text_lower, past_date)
         
         return None
     
@@ -636,6 +648,10 @@ Missing nutrients this week: {', '.join([k.replace('_', ' ').title() for k, v in
         
         prompt = f"""You are a friendly, supportive nutritionist helping a pregnant woman. Answer her question based on her profile and current nutrition status.
 
+{LANGUAGE_INSTRUCTION}
+
+IMPORTANT: You already KNOW all the pregnancy information below - use it directly to answer questions. Do NOT ask the user for information you already have.
+
 {profile_context}
 
 {trimester_focus}
@@ -644,14 +660,14 @@ Missing nutrients this week: {', '.join([k.replace('_', ' ').title() for k, v in
 
 User's question: "{question}"
 
-Provide a helpful, encouraging, and specific answer considering her pregnancy stage. If she's asking about missing nutrients, be specific about what's missing and suggest foods to add. Keep it conversational and supportive."""
+Provide a helpful, encouraging, and specific answer considering her pregnancy stage. If she's asking about pregnancy week, due date, or trimester - you KNOW this information, answer directly! If she's asking about missing nutrients, be specific about what's missing and suggest foods to add. Keep it conversational and supportive."""
         
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a friendly, supportive nutritionist specializing in pregnancy nutrition. Provide practical, encouraging advice based on the user's actual nutrition data."
+                    "content": f"You are a friendly, supportive nutritionist specializing in pregnancy nutrition. {LANGUAGE_INSTRUCTION} You have complete knowledge of this user's pregnancy profile and nutrition status - answer questions directly without asking for information you already have."
                 },
                 {
                     "role": "user",
