@@ -29,36 +29,20 @@ class OpenAIService:
             image_bytes = f.read()
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        # Vision Model Options:
-        # - gpt-4o: Best accuracy, ~$2.50-5.00 per 1M input tokens (RECOMMENDED)
-        # - gpt-4o-mini: Cheaper, ~$0.60-1.20 per 1M input tokens, lower accuracy
-        # - gpt-5.1-mini/gpt-5.2-mini: May not support vision/image inputs (verify in OpenAI docs)
-        # Note: Only "o" (omni) models support vision. GPT-5.x models may be text-only.
+        # Step 1: Identify foods in the image
         response = self.client.chat.completions.create(
-            model="gpt-4o",  # Try "gpt-4o-mini" for 4x cost savings if accuracy is acceptable
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a nutrition expert analyzing meal photos. For each food you identify, provide its nutritional values per 100g based on standard nutrition databases."
+                    "content": "You are a nutrition expert. Identify foods in the image and estimate portions."
                 },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": """Analyze this meal image and provide detailed nutrition information.
-
-For EACH food item visible, provide:
-1. Food name
-2. Estimated quantity in grams
-3. Complete nutrition values for that quantity (calories, protein_g, carbohydrates_g, fiber_g, fat_g, folate_mcg, iron_mg, calcium_mg, vitamin_d_iu, vitamin_c_mg, vitamin_a_mcg, vitamin_b12_mcg, zinc_mg, omega3_g)
-
-Format your response as a JSON-like structure or clear list. For example:
-- Steak (200g): 542 calories, 52g protein, 38g fat, 5.2mg iron, 10.6mg zinc, 5.8mcg B12
-- Asparagus (50g): 10 calories, 1.1g protein, 1.1g fiber, 26mcg folate, 1.1mg iron
-- Cherry tomatoes (30g): 5 calories, 0.3g protein, 4.1mg vitamin C
-
-Be accurate and comprehensive. Use standard nutrition database values."""
+                            "text": "What foods do you see in this meal? List each food with estimated quantity in grams. Be specific about the food type (e.g., 'grilled beef steak' not just 'meat')."
                         },
                         {
                             "type": "image_url",
@@ -69,17 +53,41 @@ Be accurate and comprehensive. Use standard nutrition database values."""
                     ]
                 }
             ],
+            max_tokens=500
+        )
+        
+        foods_identified = response.choices[0].message.content
+        
+        # Step 2: Get nutrition for the identified foods
+        nutrition_response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are a nutrition database. Return ONLY valid JSON with nutrition data.
+Use this exact format:
+{"foods": [{"name": "food name", "quantity_g": 100, "calories": 200, "protein_g": 20, "carbs_g": 10, "fat_g": 5, "fiber_g": 2, "iron_mg": 2.5, "calcium_mg": 50, "folate_mcg": 30, "vitamin_c_mg": 10, "zinc_mg": 3}]}"""
+                },
+                {
+                    "role": "user",
+                    "content": f"""Based on these foods identified in a meal, provide complete nutrition data as JSON:
+
+{foods_identified}
+
+Return ONLY the JSON object, no other text. Include all foods with their estimated quantities and full nutritional values."""
+                }
+            ],
             max_tokens=1000
         )
         
-        analysis_text = response.choices[0].message.content
+        nutrition_text = nutrition_response.choices[0].message.content
         
-        # Parse the response to extract food items with nutrients
-        food_items = self._parse_food_items_with_nutrients(analysis_text)
+        # Parse the JSON response
+        food_items = self._parse_nutrition_json(nutrition_text, foods_identified)
         
         return {
             "food_items": food_items,
-            "analysis": analysis_text
+            "analysis": foods_identified
         }
     
     def _parse_food_items(self, analysis_text: str) -> List[Dict[str, any]]:
@@ -182,12 +190,13 @@ Be accurate and comprehensive. Use standard nutrition database values."""
         
         return food_items if food_items else [{"name": "unidentified meal", "quantity": 100}]
     
-    def _parse_food_items_with_nutrients(self, analysis_text: str) -> List[Dict[str, any]]:
+    def _parse_nutrition_json(self, nutrition_text: str, fallback_text: str) -> List[Dict[str, any]]:
         """
-        Parse food items with nutrition values directly from LLM response.
+        Parse nutrition JSON from LLM response.
         
         Args:
-            analysis_text: JSON or text response from OpenAI with food and nutrition data
+            nutrition_text: JSON response from OpenAI
+            fallback_text: Original food identification text for fallback
         
         Returns:
             List of food item dictionaries with 'name', 'quantity', and 'nutrients'
@@ -197,88 +206,158 @@ Be accurate and comprehensive. Use standard nutrition database values."""
         
         food_items = []
         
-        # Try to parse as JSON first
+        # Clean up the response - extract JSON if wrapped in markdown
+        clean_text = nutrition_text.strip()
+        if "```json" in clean_text:
+            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean_text:
+            clean_text = clean_text.split("```")[1].split("```")[0].strip()
+        
+        # Try to parse as JSON
         try:
-            data = json.loads(analysis_text)
+            data = json.loads(clean_text)
+            
             # Handle different JSON structures
+            items = []
             if isinstance(data, dict):
                 if "foods" in data:
                     items = data["foods"]
                 elif "items" in data:
                     items = data["items"]
+                elif "meal" in data:
+                    items = data["meal"] if isinstance(data["meal"], list) else [data["meal"]]
                 else:
-                    items = [data]
+                    # Try to find any list in the data
+                    for key, value in data.items():
+                        if isinstance(value, list):
+                            items = value
+                            break
+                    if not items:
+                        items = [data]
+            elif isinstance(data, list):
+                items = data
+            
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                    
+                # Extract name
+                name = item.get("name", item.get("food", item.get("item", "")))
+                if not name:
+                    continue
                 
-                for item in items:
-                    food_item = {
-                        "name": item.get("name", item.get("food", "")),
-                        "quantity": item.get("quantity", item.get("grams", 100))
-                    }
-                    # Extract nutrients
-                    nutrients = {}
-                    for key in ["calories", "protein_g", "carbohydrates_g", "fiber_g", "fat_g",
-                               "folate_mcg", "iron_mg", "calcium_mg", "vitamin_d_iu", "vitamin_c_mg",
-                               "vitamin_a_mcg", "vitamin_b12_mcg", "zinc_mg", "omega3_g"]:
+                # Extract quantity
+                quantity = item.get("quantity_g", item.get("quantity", item.get("grams", item.get("amount_g", 100))))
+                if isinstance(quantity, str):
+                    # Extract number from string like "200g"
+                    match = re.search(r'(\d+)', quantity)
+                    quantity = int(match.group(1)) if match else 100
+                
+                # Extract nutrients - check various key formats
+                nutrients = {}
+                nutrient_mappings = {
+                    "calories": ["calories", "kcal", "energy", "cal"],
+                    "protein_g": ["protein_g", "protein", "proteins"],
+                    "carbohydrates_g": ["carbs_g", "carbohydrates_g", "carbohydrates", "carbs"],
+                    "fiber_g": ["fiber_g", "fiber", "fibre"],
+                    "fat_g": ["fat_g", "fat", "fats", "total_fat"],
+                    "iron_mg": ["iron_mg", "iron"],
+                    "calcium_mg": ["calcium_mg", "calcium"],
+                    "folate_mcg": ["folate_mcg", "folate", "folic_acid"],
+                    "vitamin_c_mg": ["vitamin_c_mg", "vitamin_c", "vitaminC"],
+                    "vitamin_d_iu": ["vitamin_d_iu", "vitamin_d", "vitaminD"],
+                    "vitamin_a_mcg": ["vitamin_a_mcg", "vitamin_a", "vitaminA"],
+                    "vitamin_b12_mcg": ["vitamin_b12_mcg", "vitamin_b12", "b12"],
+                    "zinc_mg": ["zinc_mg", "zinc"],
+                    "omega3_g": ["omega3_g", "omega3", "omega_3"]
+                }
+                
+                for standard_key, possible_keys in nutrient_mappings.items():
+                    for key in possible_keys:
                         if key in item:
-                            nutrients[key] = float(item[key])
-                    food_item["nutrients"] = nutrients
-                    food_items.append(food_item)
+                            try:
+                                value = item[key]
+                                if isinstance(value, (int, float)):
+                                    nutrients[standard_key] = float(value)
+                                elif isinstance(value, str):
+                                    # Extract number from string
+                                    match = re.search(r'([\d.]+)', value)
+                                    if match:
+                                        nutrients[standard_key] = float(match.group(1))
+                            except:
+                                pass
+                            break
+                
+                food_items.append({
+                    "name": name,
+                    "quantity": int(quantity),
+                    "nutrients": nutrients
+                })
+            
+            if food_items:
                 return food_items
-        except:
-            pass  # Fall through to text parsing
+                
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            print(f"Error parsing nutrition JSON: {e}")
         
-        # Parse from text format
-        lines = analysis_text.split('\n')
-        current_food = None
+        # Fallback: Try to parse the original food identification text
+        return self._parse_food_items_fallback(fallback_text)
+    
+    def _parse_food_items_fallback(self, text: str) -> List[Dict[str, any]]:
+        """
+        Fallback parser for when JSON parsing fails.
+        """
+        import re
+        food_items = []
         
+        lines = text.split('\n')
         for line in lines:
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line:
                 continue
             
-            # Pattern: "Food name (quantity): nutrients"
-            # Example: "Steak (200g): 542 calories, 52g protein, 38g fat, 5.2mg iron"
-            match = re.search(r'^[-•]?\s*(.+?)\s*\((\d+)\s*g\)\s*[:–-]\s*(.+)', line, re.IGNORECASE)
-            if match:
-                # Save previous food if exists
-                if current_food:
-                    food_items.append(current_food)
-                
-                name = match.group(1).strip()
-                quantity = int(match.group(2))
-                nutrients_text = match.group(3)
-                
-                # Parse nutrients from text
-                nutrients = self._parse_nutrients_from_text(nutrients_text, quantity)
-                
-                current_food = {
-                    "name": name,
-                    "quantity": quantity,
-                    "nutrients": nutrients
-                }
-            elif current_food and ':' in line:
-                # Continuation line with more nutrients
-                nutrients_text = line.split(':', 1)[1] if ':' in line else line
-                additional_nutrients = self._parse_nutrients_from_text(nutrients_text, current_food["quantity"])
-                current_food["nutrients"].update(additional_nutrients)
-        
-        # Add last food
-        if current_food:
-            food_items.append(current_food)
-        
-        # If still no items, try simpler parsing
-        if not food_items:
-            # Look for patterns like "200g steak: 542 cal"
-            pattern = r'(\d+)\s*g\s+([a-z\s]+?)\s*[:–-]\s*(\d+)\s*cal'
-            matches = re.findall(pattern, analysis_text.lower())
-            for quantity, name, calories in matches:
+            # Remove bullet points
+            line = re.sub(r'^[-•*\d.)]+\s*', '', line)
+            
+            # Try to find food with quantity
+            # Pattern: "Food name - approximately 200g" or "200g of food name" or "food name (200g)"
+            patterns = [
+                r'(.+?)\s*[-–]\s*(?:approximately\s*)?(\d+)\s*g',  # "Steak - approximately 200g"
+                r'(\d+)\s*g\s+(?:of\s+)?(.+)',  # "200g of steak"
+                r'(.+?)\s*\((\d+)\s*g\)',  # "Steak (200g)"
+                r'(.+?)\s*:\s*(\d+)\s*g',  # "Steak: 200g"
+            ]
+            
+            found = False
+            for pattern in patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    groups = match.groups()
+                    if pattern.startswith(r'(\d+)'):  # quantity first pattern
+                        quantity, name = int(groups[0]), groups[1].strip()
+                    else:
+                        name, quantity = groups[0].strip(), int(groups[1])
+                    
+                    if name and len(name) > 1:
+                        food_items.append({
+                            "name": name,
+                            "quantity": quantity,
+                            "nutrients": {}  # Will need to estimate
+                        })
+                        found = True
+                        break
+            
+            # If no pattern matched but line looks like a food
+            if not found and len(line) > 2 and not any(x in line.lower() for x in ['total', 'summary', 'note']):
                 food_items.append({
-                    "name": name.strip(),
-                    "quantity": int(quantity),
-                    "nutrients": {"calories": float(calories)}
+                    "name": line[:50],  # Limit length
+                    "quantity": 100,
+                    "nutrients": {}
                 })
         
-        return food_items if food_items else [{"name": "unidentified meal", "quantity": 100, "nutrients": {}}]
+        return food_items if food_items else [{"name": "meal", "quantity": 100, "nutrients": {}}]
     
     def _parse_nutrients_from_text(self, text: str, quantity: int) -> Dict[str, float]:
         """
@@ -417,40 +496,32 @@ Provide 2-3 specific, practical meal or snack suggestions that would help addres
         Returns:
             Dictionary with 'food_items' list (each with nutrients)
         """
-        prompt = f"""You are a nutrition expert. Parse this meal description and provide complete nutrition information.
-
-User said: "{text}"
-
-For EACH food item mentioned, provide:
-1. Food name
-2. Estimated quantity in grams
-3. Complete nutrition values for that quantity: calories, protein_g, carbohydrates_g, fiber_g, fat_g, folate_mcg, iron_mg, calcium_mg, vitamin_d_iu, vitamin_c_mg, vitamin_a_mcg, vitamin_b12_mcg, zinc_mg, omega3_g
-
-Format as JSON or clear list. Example:
-- Chicken breast (150g): 248 calories, 46.5g protein, 5.4g fat, 1.1mg iron
-- Brown rice (100g): 111 calories, 2.6g protein, 23g carbs, 1.8g fiber, 0.4mg iron
-
-Use standard nutrition database values. If quantity not specified, estimate typical serving size."""
-
+        # Ask LLM to return nutrition data as JSON
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a nutrition expert. Provide accurate nutrition values from standard databases."
+                    "content": """You are a nutrition database. Return ONLY valid JSON with nutrition data.
+Use this exact format:
+{"foods": [{"name": "food name", "quantity_g": 100, "calories": 200, "protein_g": 20, "carbs_g": 10, "fat_g": 5, "fiber_g": 2, "iron_mg": 2.5, "calcium_mg": 50, "folate_mcg": 30, "vitamin_c_mg": 10, "zinc_mg": 3}]}"""
                 },
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": f"""Extract foods and their complete nutrition from this meal description:
+
+"{text}"
+
+Return ONLY the JSON object. Estimate quantities if not specified. Use standard nutrition values."""
                 }
             ],
-            max_tokens=600
+            max_tokens=800
         )
         
-        analysis_text = response.choices[0].message.content
-        food_items = self._parse_food_items_with_nutrients(analysis_text)
+        nutrition_text = response.choices[0].message.content
+        food_items = self._parse_nutrition_json(nutrition_text, text)
         
-        return {"food_items": food_items, "analysis": analysis_text}
+        return {"food_items": food_items, "analysis": text}
     
     def parse_time_context(self, text: str) -> Optional[datetime]:
         """
