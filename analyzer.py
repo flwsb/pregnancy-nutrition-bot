@@ -3,6 +3,7 @@ from typing import Dict, Tuple
 from nutrition_db import NutritionDB
 from meal_diary import MealDiary
 from openai_service import OpenAIService
+from pregnancy_profile import pregnancy_profile
 
 
 class NutritionAnalyzer:
@@ -24,7 +25,8 @@ class NutritionAnalyzer:
         Returns:
             Dictionary with analysis results
         """
-        requirements = self.nutrition_db.get_daily_requirements()
+        # Use trimester-adjusted requirements
+        requirements = pregnancy_profile.get_adjusted_requirements()
         totals = self.meal_diary.get_daily_totals(user_id)
         meals = self.meal_diary.get_daily_meals(user_id)
         
@@ -63,7 +65,9 @@ class NutritionAnalyzer:
         Returns:
             Dictionary with analysis results
         """
-        requirements = self.nutrition_db.get_weekly_requirements()
+        # Use trimester-adjusted requirements (multiply daily by 7)
+        daily_req = pregnancy_profile.get_adjusted_requirements()
+        requirements = {k: v * 7 for k, v in daily_req.items()}
         totals = self.meal_diary.get_weekly_totals(user_id)
         meals = self.meal_diary.get_weekly_meals(user_id)
         
@@ -107,7 +111,12 @@ class NutritionAnalyzer:
         percentages = analysis["percentages"]
         meal_count = analysis["meal_count"]
         
-        summary = f"📊 Daily Nutrition Summary ({meal_count} meals logged)\n\n"
+        # Add pregnancy context
+        week = pregnancy_profile.get_current_week()
+        trimester = pregnancy_profile.get_trimester_name()
+        
+        summary = f"📊 Daily Nutrition Summary ({meal_count} meals logged)\n"
+        summary += f"🤰 Week {week} ({trimester} Trimester)\n\n"
         
         # Key nutrients to highlight
         key_nutrients = [
@@ -153,7 +162,13 @@ class NutritionAnalyzer:
         percentages = analysis["percentages"]
         meal_count = analysis["meal_count"]
         
-        summary = f"📊 Weekly Nutrition Summary ({meal_count} meals logged)\n\n"
+        # Add pregnancy context
+        week = pregnancy_profile.get_current_week()
+        trimester = pregnancy_profile.get_trimester_name()
+        focus_nutrients = pregnancy_profile.get_trimester_focus_nutrients()
+        
+        summary = f"📊 Weekly Nutrition Summary ({meal_count} meals logged)\n"
+        summary += f"🤰 Week {week} ({trimester} Trimester)\n\n"
         
         # Key nutrients to highlight
         key_nutrients = [

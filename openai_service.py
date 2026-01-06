@@ -5,6 +5,7 @@ from openai import OpenAI
 from config import OPENAI_API_KEY
 from datetime import datetime, timedelta
 import re
+from pregnancy_profile import pregnancy_profile
 
 
 class OpenAIService:
@@ -415,6 +416,10 @@ Return ONLY the JSON object, no other text. Include all foods with their estimat
         Returns:
             Recommendation text
         """
+        # Get pregnancy context
+        profile_context = pregnancy_profile.get_context_string()
+        trimester_focus = pregnancy_profile.get_trimester_focus_nutrients()
+        
         # Format missing nutrients for the prompt
         missing_list = []
         for nutrient, deficit in missing_nutrients.items():
@@ -424,7 +429,11 @@ Return ONLY the JSON object, no other text. Include all foods with their estimat
         
         missing_text = "\n".join(missing_list) if missing_list else "None - you're meeting all targets!"
         
-        prompt = f"""You are a nutritionist helping a pregnant woman optimize her diet. 
+        prompt = f"""You are a nutritionist helping a pregnant woman optimize her diet.
+
+{profile_context}
+
+{trimester_focus}
 
 Current daily intake:
 - Calories: {daily_totals.get('calories', 0):.0f} / {requirements.get('calories', 0):.0f}
@@ -436,7 +445,7 @@ Current daily intake:
 Nutrients that need attention:
 {missing_text}
 
-Provide 2-3 specific, practical meal or snack suggestions that would help address the missing nutrients. Be encouraging and pregnancy-appropriate. Keep it concise (2-3 sentences per suggestion)."""
+Provide 2-3 specific, practical meal or snack suggestions that would help address the missing nutrients, considering her current trimester. Be encouraging and pregnancy-appropriate. Keep it concise (2-3 sentences per suggestion)."""
 
         # Text Model Options (cost per 1M tokens - input/output):
         # - gpt-4o-mini: $0.15/$0.60 (CHEAPEST - RECOMMENDED)
@@ -584,6 +593,10 @@ Return ONLY the JSON object. Estimate quantities if not specified. Use standard 
         Returns:
             Answer to the question
         """
+        # Get pregnancy context
+        profile_context = pregnancy_profile.get_context_string()
+        trimester_focus = pregnancy_profile.get_trimester_focus_nutrients()
+        
         # Get current nutrition status
         try:
             daily_analysis = analyzer.analyze_daily_intake(user_id)
@@ -600,7 +613,7 @@ Return ONLY the JSON object. Estimate quantities if not specified. Use standard 
             weekly_missing = weekly_analysis["missing_nutrients"]
             
             # Format context for AI
-            context = f"""User's current nutrition status:
+            nutrition_context = f"""CURRENT NUTRITION STATUS:
 
 DAILY (Today):
 - Calories: {daily_totals.get('calories', 0):.0f} / {daily_requirements.get('calories', 0):.0f}
@@ -619,15 +632,19 @@ WEEKLY (Past 7 days):
 Missing nutrients this week: {', '.join([k.replace('_', ' ').title() for k, v in weekly_missing.items() if v > 0]) if weekly_missing else 'None'}
 """
         except Exception as e:
-            context = "User's nutrition data is not available yet."
+            nutrition_context = "Nutrition data is not available yet (no meals logged)."
         
-        prompt = f"""You are a friendly, supportive nutritionist helping a pregnant woman. Answer her question based on her current nutrition status.
+        prompt = f"""You are a friendly, supportive nutritionist helping a pregnant woman. Answer her question based on her profile and current nutrition status.
 
-{context}
+{profile_context}
+
+{trimester_focus}
+
+{nutrition_context}
 
 User's question: "{question}"
 
-Provide a helpful, encouraging, and specific answer. If she's asking about missing nutrients, be specific about what's missing and suggest foods to add. Keep it conversational and supportive."""
+Provide a helpful, encouraging, and specific answer considering her pregnancy stage. If she's asking about missing nutrients, be specific about what's missing and suggest foods to add. Keep it conversational and supportive."""
         
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
