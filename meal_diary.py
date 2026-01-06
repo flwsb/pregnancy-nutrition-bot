@@ -1,8 +1,19 @@
-"""Meal diary database operations using SQLite."""
-import sqlite3
+"""Meal diary database operations using PostgreSQL (Railway) or SQLite (local)."""
+import os
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-from config import DATABASE_PATH
+
+# Check if we have a PostgreSQL DATABASE_URL (Railway), otherwise use SQLite
+DATABASE_URL = os.getenv("DATABASE_URL")
+USE_POSTGRES = DATABASE_URL is not None and DATABASE_URL.startswith("postgresql")
+
+if USE_POSTGRES:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+else:
+    import sqlite3
+    from config import DATABASE_PATH
 
 
 class MealDiary:
@@ -10,24 +21,52 @@ class MealDiary:
     
     def __init__(self):
         """Initialize database connection and create tables if needed."""
-        self.db_path = DATABASE_PATH
+        self.use_postgres = USE_POSTGRES
+        if not self.use_postgres:
+            self.db_path = DATABASE_PATH
         self._init_database()
+    
+    def _get_connection(self):
+        """Get database connection (PostgreSQL or SQLite)."""
+        if self.use_postgres:
+            return psycopg2.connect(DATABASE_URL)
+        else:
+            return sqlite3.connect(self.db_path)
     
     def _init_database(self):
         """Create database tables if they don't exist."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS meals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                timestamp DATETIME NOT NULL,
-                food_items TEXT NOT NULL,
-                nutrients TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        if self.use_postgres:
+            # PostgreSQL syntax
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS meals (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    timestamp TIMESTAMP NOT NULL,
+                    food_items TEXT NOT NULL,
+                    nutrients TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Create index for faster queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_meals_user_timestamp 
+                ON meals(user_id, timestamp)
+            """)
+        else:
+            # SQLite syntax
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS meals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    timestamp DATETIME NOT NULL,
+                    food_items TEXT NOT NULL,
+                    nutrients TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         
         conn.commit()
         conn.close()
@@ -46,10 +85,9 @@ class MealDiary:
         Returns:
             Meal ID
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
         
-        import json
         food_items_json = json.dumps(food_items)
         nutrients_json = json.dumps(nutrients)
         
@@ -57,12 +95,20 @@ class MealDiary:
         if meal_timestamp is None:
             meal_timestamp = datetime.now()
         
-        cursor.execute("""
-            INSERT INTO meals (user_id, timestamp, food_items, nutrients)
-            VALUES (?, ?, ?, ?)
-        """, (user_id, meal_timestamp.isoformat(), food_items_json, nutrients_json))
+        if self.use_postgres:
+            cursor.execute("""
+                INSERT INTO meals (user_id, timestamp, food_items, nutrients)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+            """, (user_id, meal_timestamp, food_items_json, nutrients_json))
+            meal_id = cursor.fetchone()[0]
+        else:
+            cursor.execute("""
+                INSERT INTO meals (user_id, timestamp, food_items, nutrients)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, meal_timestamp.isoformat(), food_items_json, nutrients_json))
+            meal_id = cursor.lastrowid
         
-        meal_id = cursor.lastrowid
         conn.commit()
         conn.close()
         
@@ -85,25 +131,36 @@ class MealDiary:
         start_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
         
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT id, timestamp, food_items, nutrients
-            FROM meals
-            WHERE user_id = ? AND timestamp >= ? AND timestamp < ?
-            ORDER BY timestamp ASC
-        """, (user_id, start_date.isoformat(), end_date.isoformat()))
+        if self.use_postgres:
+            cursor.execute("""
+                SELECT id, timestamp, food_items, nutrients
+                FROM meals
+                WHERE user_id = %s AND timestamp >= %s AND timestamp < %s
+                ORDER BY timestamp ASC
+            """, (user_id, start_date, end_date))
+        else:
+            cursor.execute("""
+                SELECT id, timestamp, food_items, nutrients
+                FROM meals
+                WHERE user_id = ? AND timestamp >= ? AND timestamp < ?
+                ORDER BY timestamp ASC
+            """, (user_id, start_date.isoformat(), end_date.isoformat()))
         
         rows = cursor.fetchall()
         conn.close()
         
-        import json
         meals = []
         for row in rows:
+            timestamp = row[1]
+            # Convert timestamp to string if it's a datetime object
+            if isinstance(timestamp, datetime):
+                timestamp = timestamp.isoformat()
             meals.append({
                 "id": row[0],
-                "timestamp": row[1],
+                "timestamp": timestamp,
                 "food_items": json.loads(row[2]),
                 "nutrients": json.loads(row[3])
             })
@@ -126,25 +183,36 @@ class MealDiary:
         
         start_date = end_date - timedelta(days=7)
         
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT id, timestamp, food_items, nutrients
-            FROM meals
-            WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
-            ORDER BY timestamp ASC
-        """, (user_id, start_date.isoformat(), end_date.isoformat()))
+        if self.use_postgres:
+            cursor.execute("""
+                SELECT id, timestamp, food_items, nutrients
+                FROM meals
+                WHERE user_id = %s AND timestamp >= %s AND timestamp <= %s
+                ORDER BY timestamp ASC
+            """, (user_id, start_date, end_date))
+        else:
+            cursor.execute("""
+                SELECT id, timestamp, food_items, nutrients
+                FROM meals
+                WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+                ORDER BY timestamp ASC
+            """, (user_id, start_date.isoformat(), end_date.isoformat()))
         
         rows = cursor.fetchall()
         conn.close()
         
-        import json
         meals = []
         for row in rows:
+            timestamp = row[1]
+            # Convert timestamp to string if it's a datetime object
+            if isinstance(timestamp, datetime):
+                timestamp = timestamp.isoformat()
             meals.append({
                 "id": row[0],
-                "timestamp": row[1],
+                "timestamp": timestamp,
                 "food_items": json.loads(row[2]),
                 "nutrients": json.loads(row[3])
             })
