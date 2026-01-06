@@ -3,6 +3,8 @@ import base64
 from typing import Dict, List, Optional
 from openai import OpenAI
 from config import OPENAI_API_KEY
+from datetime import datetime, timedelta
+import re
 
 
 class OpenAIService:
@@ -182,6 +184,188 @@ Provide 2-3 specific, practical meal or snack suggestions that would help addres
                 }
             ],
             max_tokens=300,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content
+    
+    def transcribe_voice(self, audio_path: str) -> str:
+        """
+        Transcribe voice message using OpenAI Whisper API.
+        
+        Args:
+            audio_path: Path to the audio file
+        
+        Returns:
+            Transcribed text
+        """
+        with open(audio_path, "rb") as audio_file:
+            transcript = self.client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="en"
+            )
+        return transcript.text
+    
+    def parse_meal_description(self, text: str) -> Dict:
+        """
+        Parse meal description from text to extract foods and quantities.
+        
+        Args:
+            text: Description of the meal
+        
+        Returns:
+            Dictionary with 'food_items' list
+        """
+        prompt = f"""You are a nutrition expert. Parse this meal description and extract all foods with estimated quantities in grams.
+
+User said: "{text}"
+
+Return a structured list of foods. For each food item, provide:
+1. The food name
+2. Estimated quantity in grams (e.g., 150g chicken breast, 100g rice)
+
+Format your response as a clear list that can be parsed. If no specific quantity is mentioned, estimate based on typical serving sizes."""
+
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a nutrition expert parsing meal descriptions. Extract foods and quantities accurately."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=300
+        )
+        
+        analysis_text = response.choices[0].message.content
+        food_items = self._parse_food_items(analysis_text)
+        
+        return {"food_items": food_items, "analysis": analysis_text}
+    
+    def parse_time_context(self, text: str) -> Optional[datetime]:
+        """
+        Parse time context from text (e.g., "today's lunch", "yesterday's breakfast").
+        
+        Args:
+            text: Text that may contain time references
+        
+        Returns:
+            Datetime object or None if no time context found
+        """
+        from datetime import datetime, timedelta
+        import re
+        
+        text_lower = text.lower()
+        now = datetime.now()
+        
+        # Today's meals
+        if "today" in text_lower or "this" in text_lower:
+            # Default to current time if it's today
+            return now
+        
+        # Yesterday
+        if "yesterday" in text_lower:
+            yesterday = now - timedelta(days=1)
+            # Try to parse meal time
+            if "breakfast" in text_lower:
+                return yesterday.replace(hour=8, minute=0, second=0, microsecond=0)
+            elif "lunch" in text_lower:
+                return yesterday.replace(hour=13, minute=0, second=0, microsecond=0)
+            elif "dinner" in text_lower or "supper" in text_lower:
+                return yesterday.replace(hour=19, minute=0, second=0, microsecond=0)
+            return yesterday.replace(hour=12, minute=0, second=0, microsecond=0)
+        
+        # Days ago
+        days_match = re.search(r'(\d+)\s+days?\s+ago', text_lower)
+        if days_match:
+            days = int(days_match.group(1))
+            past_date = now - timedelta(days=days)
+            if "breakfast" in text_lower:
+                return past_date.replace(hour=8, minute=0, second=0, microsecond=0)
+            elif "lunch" in text_lower:
+                return past_date.replace(hour=13, minute=0, second=0, microsecond=0)
+            elif "dinner" in text_lower or "supper" in text_lower:
+                return past_date.replace(hour=19, minute=0, second=0, microsecond=0)
+            return past_date.replace(hour=12, minute=0, second=0, microsecond=0)
+        
+        return None
+    
+    def answer_nutrition_question(self, question: str, user_id: int, meal_diary, analyzer) -> str:
+        """
+        Answer nutrition-related questions using context from user's meal diary.
+        
+        Args:
+            question: User's question
+            user_id: Telegram user ID
+            meal_diary: MealDiary instance
+            analyzer: NutritionAnalyzer instance
+        
+        Returns:
+            Answer to the question
+        """
+        # Get current nutrition status
+        try:
+            daily_analysis = analyzer.analyze_daily_intake(user_id)
+            weekly_analysis = analyzer.analyze_weekly_intake(user_id)
+            
+            daily_totals = daily_analysis["totals"]
+            daily_requirements = daily_analysis["requirements"]
+            daily_gaps = daily_analysis["gaps"]
+            daily_missing = daily_analysis["missing_nutrients"]
+            
+            weekly_totals = weekly_analysis["totals"]
+            weekly_requirements = weekly_analysis["requirements"]
+            weekly_gaps = weekly_analysis["gaps"]
+            weekly_missing = weekly_analysis["missing_nutrients"]
+            
+            # Format context for AI
+            context = f"""User's current nutrition status:
+
+DAILY (Today):
+- Calories: {daily_totals.get('calories', 0):.0f} / {daily_requirements.get('calories', 0):.0f}
+- Protein: {daily_totals.get('protein_g', 0):.1f}g / {daily_requirements.get('protein_g', 0):.1f}g
+- Iron: {daily_totals.get('iron_mg', 0):.1f}mg / {daily_requirements.get('iron_mg', 0):.1f}mg
+- Folate: {daily_totals.get('folate_mcg', 0):.1f}mcg / {daily_requirements.get('folate_mcg', 0):.1f}mcg
+- Calcium: {daily_totals.get('calcium_mg', 0):.1f}mg / {daily_requirements.get('calcium_mg', 0):.1f}mg
+
+Missing nutrients today: {', '.join([k.replace('_', ' ').title() for k, v in daily_missing.items() if v > 0]) if daily_missing else 'None'}
+
+WEEKLY (Past 7 days):
+- Calories: {weekly_totals.get('calories', 0):.0f} / {weekly_requirements.get('calories', 0):.0f}
+- Protein: {weekly_totals.get('protein_g', 0):.1f}g / {weekly_requirements.get('protein_g', 0):.1f}g
+- Iron: {weekly_totals.get('iron_mg', 0):.1f}mg / {weekly_requirements.get('iron_mg', 0):.1f}mg
+
+Missing nutrients this week: {', '.join([k.replace('_', ' ').title() for k, v in weekly_missing.items() if v > 0]) if weekly_missing else 'None'}
+"""
+        except Exception as e:
+            context = "User's nutrition data is not available yet."
+        
+        prompt = f"""You are a friendly, supportive nutritionist helping a pregnant woman. Answer her question based on her current nutrition status.
+
+{context}
+
+User's question: "{question}"
+
+Provide a helpful, encouraging, and specific answer. If she's asking about missing nutrients, be specific about what's missing and suggest foods to add. Keep it conversational and supportive."""
+        
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a friendly, supportive nutritionist specializing in pregnancy nutrition. Provide practical, encouraging advice based on the user's actual nutrition data."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=400,
             temperature=0.7
         )
         

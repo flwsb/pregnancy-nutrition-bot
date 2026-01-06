@@ -32,7 +32,8 @@ class MealDiary:
         conn.commit()
         conn.close()
     
-    def add_meal(self, user_id: int, food_items: List[Dict], nutrients: Dict[str, float]) -> int:
+    def add_meal(self, user_id: int, food_items: List[Dict], nutrients: Dict[str, float], 
+                 meal_timestamp: Optional[datetime] = None) -> int:
         """
         Add a meal to the diary.
         
@@ -40,6 +41,7 @@ class MealDiary:
             user_id: Telegram user ID
             food_items: List of identified food items
             nutrients: Calculated nutrient values
+            meal_timestamp: Optional custom timestamp for the meal (defaults to now)
         
         Returns:
             Meal ID
@@ -51,10 +53,14 @@ class MealDiary:
         food_items_json = json.dumps(food_items)
         nutrients_json = json.dumps(nutrients)
         
+        # Use custom timestamp if provided, otherwise use current time
+        if meal_timestamp is None:
+            meal_timestamp = datetime.now()
+        
         cursor.execute("""
             INSERT INTO meals (user_id, timestamp, food_items, nutrients)
             VALUES (?, ?, ?, ?)
-        """, (user_id, datetime.now().isoformat(), food_items_json, nutrients_json))
+        """, (user_id, meal_timestamp.isoformat(), food_items_json, nutrients_json))
         
         meal_id = cursor.lastrowid
         conn.commit()
